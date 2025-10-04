@@ -15,3 +15,10 @@ DS_Store
 
 # ignore chroma db files
 tmp/*
+
+*.env
+*.pkl
+*.bin
+
+# ignore ipynb files
+*.ipynb

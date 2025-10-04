@@ -15,6 +15,7 @@ from langchain.agents import Tool
 
 from fastapi_backend.services.llm_service import LLMService
 from fastapi_backend.rag_module.paper_scraper import PaperScraper
+from fastapi_backend.rag_module.structured_reader import StructuredReader, BiologicalEffect
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class VanillaRAGPipeline:
                 chunk_size: int = 1000,
                 chunk_overlap: int = 200,
                 csv_path: str = None,
+                top_k_docs: int = 5,
                 ):
         warnings.filterwarnings("ignore")
 
@@ -42,8 +44,13 @@ class VanillaRAGPipeline:
         self.chroma_db_dir = chroma_persist_dir
         self.query_preprocessor=None
         self.csv_path = csv_path
-
+        self.top_k_docs = top_k_docs
         self.scraper = PaperScraper()
+        self.structured_reader = StructuredReader(llm_svc) if llm_svc else None
+        
+        # Add initialization flags
+        self._papers_initialized = False
+        self._documents_initialized = False
 
     def _load_csv(self, csv_path: str) -> pd.DataFrame:
         """Load CSV with paper titles and links."""
@@ -144,9 +151,12 @@ class VanillaRAGPipeline:
                 embedding_function=self.embedding_model,
                 persist_directory=persist_dir,
             )
+            logger.info("Papers Chroma DB loaded successfully")
+            self._papers_initialized = True
         else:
             logger.info("Creating new Papers Chroma DB...")
             if self.documents is None:
+                logger.info("Documents not loaded, fetching from CSV...")
                 self._get_documents_from_csv()
             
             # Store papers as single documents (no chunking)
@@ -184,7 +194,9 @@ class VanillaRAGPipeline:
                 ids=[doc.id for doc in paper_docs],
             )
             
-            self.paperSearch.persist()
+            # self.paperSearch.persist()
+            logger.info("Papers Chroma DB created and persisted successfully")
+            self._papers_initialized = True
 
         return self.paperSearch
 
@@ -213,6 +225,7 @@ class VanillaRAGPipeline:
                 persist_directory=persist_dir,
                 # client_settings=client_settings #TODO Add client_settings for production #Settings(anonymized_telemetry=False)
             )
+            self._documents_initialized = True
         else:
             logger.info("Creating new Chroma DB...")
             documents = self._get_documents_from_csv()
@@ -256,7 +269,8 @@ class VanillaRAGPipeline:
                 # client_settings= client_settings #TODO Add client_settings for production #Settings(anonymized_telemetry=False)
             )
         
-            self.docSearch.persist()
+            # self.docSearch.persist()
+            self._documents_initialized = True
 
         return self.docSearch
 
@@ -273,11 +287,14 @@ class VanillaRAGPipeline:
             List of relevant papers with metadata
         """
         if self.paperSearch is None:
+            logger.info("Paper vector store not initialized, setting up...")
             self._setup_paper_vector_store()
         
         # Search papers
         retriever_papers = self.paperSearch.as_retriever(search_kwargs={"k": top_k})
         found_papers = retriever_papers.get_relevant_documents(query=query)
+        
+        logger.info(f"Found {len(found_papers)} papers for query: {query}")
         
         # Format results similar to rag.py
         formatted_results = []
@@ -298,7 +315,7 @@ class VanillaRAGPipeline:
 
     def retrieve_documents(self, query: str, top_k_docs: int = 5) -> Tuple[List[Tuple[Document, float]], Dict[str, Any]]:
         """
-        Retrieve relevant documents with optional query preprocessing.
+        Retrieve relevant chunked documents (not papers) with optional query preprocessing.
         """
         retrieval_info = {
             'original_query': query,
@@ -308,8 +325,8 @@ class VanillaRAGPipeline:
         }
         
         
-        if self.documents is None:
-            self._get_documents_from_csv()
+        # if self.documents is None:
+        #     self._get_documents_from_csv()
 
         # Perform retrieval
         if not self.docSearch:
@@ -370,15 +387,17 @@ class VanillaRAGPipeline:
         if self.llm_model is None:
             raise ValueError("LLM model is not set")
         if self.docSearch is None:
+            logger.info("Document vector store not initialized, setting up...")
             self._setup_vector_store()
-        
+
         qa = RetrievalQA.from_chain_type(
             llm=self.llm_model,
             chain_type="stuff",
-            retriever=self.docSearch.as_retriever(),
+            retriever=self.docSearch.as_retriever(search_kwargs={"k": self.top_k_docs}),
             return_source_documents=True
         )
         self.qa = qa
+        logger.info("QA chain setup completed")
         return qa
 
     def get_qa_tool(self):
@@ -389,4 +408,94 @@ class VanillaRAGPipeline:
             name="DocumentQA",
             func=self.qa,   # could also use self.qa.invoke
             description="Answer questions based on the ingested source documents such as regulatory documents, investigatory brochures, company documents, project reports, etc."
-        )        
+        )
+    
+    def extract_biological_effects(self, 
+                                 query: str, 
+                                 target_protein: str = "EGFR",
+                                 condition: str = "Microgravity",
+                                 top_k: int = 5,
+                                 use_papers: bool = False) -> List[BiologicalEffect]:
+        """
+        Extract biological effects using structured reader.
+        
+        Args:
+            query: Search query
+            target_protein: Target protein to focus on (default: EGFR)
+            condition: Experimental condition to focus on (default: Microgravity)
+            top_k: Number of documents/papers to retrieve
+            use_papers: If True, search papers instead of document chunks
+            
+        Returns:
+            List of BiologicalEffect objects
+        """
+        if self.structured_reader is None:
+            raise ValueError("Structured reader not initialized. LLM service required.")
+        
+        if use_papers:
+            return self.structured_reader.extract_from_papers(
+                query=query,
+                rag_pipeline=self,
+                target_protein=target_protein,
+                condition=condition,
+                top_k=top_k
+            )
+        else:
+            return self.structured_reader.extract_from_query(
+                query=query,
+                rag_pipeline=self,
+                target_protein=target_protein,
+                condition=condition,
+                top_k=top_k
+            )
+    
+    def extract_biological_effects_from_documents(self, 
+                                                documents: List[Document],
+                                                target_protein: str = "EGFR",
+                                                condition: str = "Microgravity",
+                                                max_effects: int = 10) -> List[BiologicalEffect]:
+        """
+        Extract biological effects directly from provided documents.
+        
+        Args:
+            documents: List of Document objects to extract from
+            target_protein: Target protein to focus on (default: EGFR)
+            condition: Experimental condition to focus on (default: Microgravity)
+            max_effects: Maximum number of effects to extract
+            
+        Returns:
+            List of BiologicalEffect objects
+        """
+        if self.structured_reader is None:
+            raise ValueError("Structured reader not initialized. LLM service required.")
+        
+        return self.structured_reader.extract_biological_effects(
+            documents=documents,
+            target_protein=target_protein,
+            condition=condition,
+            max_effects=max_effects
+        )
+    
+    def initialize_vector_stores(self, force_rebuild: bool = False):
+        """
+        Initialize both vector stores if not already done.
+        
+        Args:
+            force_rebuild: If True, rebuild the vector stores even if they exist
+        """
+        logger.info("Initializing vector stores...")
+        
+        # Initialize document vector store
+        if not self._documents_initialized or force_rebuild:
+            logger.info("Setting up document vector store...")
+            self._setup_vector_store()
+            self._documents_initialized = True
+        
+        # Initialize paper vector store
+        if not self._papers_initialized or force_rebuild:
+            logger.info("Setting up paper vector store...")
+            self._setup_paper_vector_store()
+            self._papers_initialized = True
+        
+        logger.info("Vector stores initialization completed")
+        return self.get_vector_store_status()        

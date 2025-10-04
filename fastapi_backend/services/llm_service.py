@@ -30,14 +30,6 @@ class LLMService:
         
         return formatter.invoke(messages)
     
-    def invoke_chat_response(self, messages):
-        """Get AI chat response with structured output"""
-        return self.invoke_structured_output(AIChatResponse, messages)
-    
-    def invoke_agent_instructions(self, messages):
-        """Get agent instructions with structured output"""
-        return self.invoke_structured_output(AgentInstructions, messages)
-    
     def invoke(self, prompt, **kwargs):
         """Invoke LLM with prompt - compatibility method"""
         return self.llm_provider.invoke(prompt)

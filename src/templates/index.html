@@ -435,6 +435,79 @@
             background: #dbeafe;
         }
 
+        /* Tooltip */
+        .custom-tooltip {
+            position: fixed;
+            background: white;
+            border: 2px solid var(--primary);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+            max-width: 400px;
+            z-index: 10000;
+            pointer-events: none;
+            display: none;
+        }
+
+        .custom-tooltip.visible {
+            display: block;
+        }
+
+        .tooltip-loading {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-muted);
+        }
+
+        .tooltip-spinner {
+            border: 2px solid var(--border);
+            border-top: 2px solid var(--primary);
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+        }
+
+        .tooltip-header {
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .tooltip-type {
+            font-size: 0.75rem;
+            padding: 0.2rem 0.5rem;
+            background: var(--bg-light);
+            border-radius: 0.25rem;
+            color: var(--text-muted);
+        }
+
+        .tooltip-summary {
+            line-height: 1.6;
+            margin: 0.75rem 0;
+            color: var(--text-dark);
+        }
+
+        .tooltip-meta {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .tooltip-papers {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+            font-style: italic;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .header h1 {
@@ -614,10 +687,165 @@
         </div>
     </div>
 
+    <!-- Custom Tooltip -->
+    <div id="custom-tooltip" class="custom-tooltip"></div>
+
     <script>
         // State
         let currentEntity = null;
         let graphData = null;
+        // Tooltip state and cache
+        let tooltipCache = {};
+        let tooltipTimeout = null;
+        let tooltipVisibleTimeout = null;
+
+        // Utility: get tooltip element (Cached accessor)
+        function getTooltipEl() {
+            return document.getElementById('custom-tooltip');
+        }
+
+        // Show tooltip at page coordinates (x, y) with HTML content
+        function showTooltip(x, y, html) {
+            const tooltip = getTooltipEl();
+            if (!tooltip) return;
+
+            tooltip.innerHTML = html || '';
+            tooltip.classList.add('visible');
+            tooltip.style.display = 'block';
+            tooltip.style.pointerEvents = 'none';
+
+            // Position after it's added so we can measure size
+            // use pageX/Y to account for scroll
+            const leftCandidate = x + 15;
+            const topCandidate = y + 15;
+
+            // Force layout to get size
+            const rect = tooltip.getBoundingClientRect();
+            let left = leftCandidate;
+            let top = topCandidate;
+
+            // Keep in viewport (account for scrolling)
+            const scrollX = window.scrollX || window.pageXOffset;
+            const scrollY = window.scrollY || window.pageYOffset;
+            const viewportW = window.innerWidth;
+            const viewportH = window.innerHeight;
+
+            if (leftCandidate + rect.width > scrollX + viewportW) {
+                left = x - rect.width - 15;
+            }
+            if (topCandidate + rect.height > scrollY + viewportH) {
+                top = y - rect.height - 15;
+            }
+
+            tooltip.style.left = Math.max(8, left) + 'px';
+            tooltip.style.top = Math.max(8, top) + 'px';
+
+            // ensure tooltip is removed after inactivity
+            if (tooltipVisibleTimeout) clearTimeout(tooltipVisibleTimeout);
+            tooltipVisibleTimeout = setTimeout(() => {
+                // keep visible; this timeout prevents stuck state if hideTooltip not called
+                tooltip.classList.remove('visible');
+                tooltip.style.display = 'none';
+            }, 30_000); // fallback hide after 30s
+        }
+
+        function hideTooltip() {
+            if (tooltipTimeout) {
+                clearTimeout(tooltipTimeout);
+                tooltipTimeout = null;
+            }
+            if (tooltipVisibleTimeout) {
+                clearTimeout(tooltipVisibleTimeout);
+                tooltipVisibleTimeout = null;
+            }
+            const tooltip = getTooltipEl();
+            if (!tooltip) return;
+            tooltip.classList.remove('visible');
+            // small delay before setting display none to allow CSS transitions if any
+            setTimeout(() => {
+                tooltip.style.display = 'none';
+            }, 80);
+        }
+
+        // Fetch helpers with caching
+        async function fetchEntityTooltip(entityName) {
+            if (!entityName) return null;
+            if (tooltipCache[entityName]) return tooltipCache[entityName];
+            try {
+                const res = await fetch(`/api/tooltip/entity/${encodeURIComponent(entityName)}`);
+                if (!res.ok) return null;
+                const data = await res.json();
+                if (!data.error) {
+                    tooltipCache[entityName] = data;
+                    return data;
+                }
+            } catch (err) {
+                console.error('fetchEntityTooltip error', err);
+            }
+            return null;
+        }
+
+        async function fetchRelationshipTooltip(source, relation, target) {
+            const key = `${source}---${relation}---${target}`;
+            if (tooltipCache[key]) return tooltipCache[key];
+            try {
+                const res = await fetch('/api/tooltip/relationship', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source, relation, target })
+                });
+                if (!res.ok) return null;
+                const data = await res.json();
+                if (!data.error) {
+                    tooltipCache[key] = data;
+                    return data;
+                }
+            } catch (err) {
+                console.error('fetchRelationshipTooltip error', err);
+            }
+            return null;
+        }
+
+        // UI helpers that show a lightweight loader, then populate
+        function showEntityTooltip(event, entityName) {
+            if (!entityName) return;
+            if (tooltipTimeout) clearTimeout(tooltipTimeout);
+
+            const pageX = (event && event.pageX) || (event && event.clientX + window.scrollX) || 0;
+            const pageY = (event && event.pageY) || (event && event.clientY + window.scrollY) || 0;
+
+            // show quick loading state
+            showTooltip(pageX, pageY, `\n                <div class="tooltip-loading">\n                    <div class="tooltip-spinner"></div>\n                    <span>Loading insights...</span>\n                </div>\n            `);
+
+            tooltipTimeout = setTimeout(async () => {
+                const data = await fetchEntityTooltip(entityName);
+                if (data) {
+                    const content = `\n                        <div class="tooltip-header">\n                            ${data.entity || entityName}\n                            <span class="tooltip-type">${data.type || ''}</span>\n                        </div>\n                        <div class="tooltip-summary">${data.summary || 'No summary available'}</div>\n                        <div class="tooltip-meta">\n                            📊 Frequency: ${data.frequency ?? 'N/A'} | 📚 Papers: ${data.total_papers ?? (data.papers ? data.papers.length : 'N/A')}\n                        </div>\n                        ${data.papers && data.papers.length ? `\n                            <div class="tooltip-papers">Related: ${data.papers.slice(0,5).join('; ')}</div>\n                        ` : ''}\n                    `;
+                    showTooltip(pageX, pageY, content);
+                } else {
+                    showTooltip(pageX, pageY, `<div class="tooltip-summary">No data</div>`);
+                }
+            }, 250); // debounce to avoid spamming API
+        }
+
+        function showRelationshipTooltip(event, source, relation, target) {
+            if (tooltipTimeout) clearTimeout(tooltipTimeout);
+
+            const pageX = (event && event.pageX) || (event && event.clientX + window.scrollX) || 0;
+            const pageY = (event && event.pageY) || (event && event.clientY + window.scrollY) || 0;
+
+            showTooltip(pageX, pageY, `\n                <div class="tooltip-loading">\n                    <div class="tooltip-spinner"></div>\n                    <span>Analyzing relationship...</span>\n                </div>\n            `);
+
+            tooltipTimeout = setTimeout(async () => {
+                const data = await fetchRelationshipTooltip(source, relation, target);
+                if (data) {
+                    const content = `\n                        <div class="tooltip-header">\n                            <span class="relation-badge">${data.relation || relation}</span>\n                        </div>\n                        <div class="tooltip-summary">${data.summary || 'No summary available'}</div>\n                        ${data.supporting_papers && data.supporting_papers.length ? `\n                            <div class="tooltip-papers">Evidence: ${data.supporting_papers.slice(0,5).join('; ')}<\/div>\n                        ` : ''}\n                    `;
+                    showTooltip(pageX, pageY, content);
+                } else {
+                    showTooltip(pageX, pageY, `<div class="tooltip-summary">No data</div>`);
+                }
+            }, 300);
+        }
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
@@ -959,7 +1187,27 @@
                 .attr('stroke', '#999')
                 .attr('stroke-opacity', 0.6)
                 .attr('stroke-width', 2)
-                .attr('marker-end', 'url(#arrow)');
+                .attr('marker-end', 'url(#arrow)')
+                .style('cursor', 'pointer')
+                .on('mouseover', function(event, d) {
+                    d3.select(this).attr('stroke', '#2563eb').attr('stroke-width', 3);
+                    const sourceNode = data.nodes.find(n => n.id === d.source.id || n.id === d.source);
+                    const targetNode = data.nodes.find(n => n.id === d.target.id || n.id === d.target);
+                    if (sourceNode && targetNode) {
+                        showRelationshipTooltip(event, sourceNode.id, d.relation, targetNode.id);
+                    }
+                })
+                .on('mouseout', function(event, d) {
+                    d3.select(this).attr('stroke', '#999').attr('stroke-width', 2);
+                    hideTooltip();
+                })
+                .on('mousemove', function(event) {
+                    const tooltip = document.getElementById('custom-tooltip');
+                    if (tooltip.classList.contains('visible')) {
+                        tooltip.style.left = (event.pageX + 15) + 'px';
+                        tooltip.style.top = (event.pageY + 15) + 'px';
+                    }
+                });
 
             // Create nodes
             const node = svg.append('g')
@@ -970,6 +1218,22 @@
                 .attr('fill', d => d.id.toLowerCase() === currentEntity.toLowerCase() ? '#ef4444' : '#2563eb')
                 .attr('stroke', '#fff')
                 .attr('stroke-width', 2)
+                .style('cursor', 'pointer')
+                .on('mouseover', function(event, d) {
+                    d3.select(this).attr('r', d.id.toLowerCase() === currentEntity.toLowerCase() ? 18 : 11);
+                    showEntityTooltip(event, d.id);
+                })
+                .on('mouseout', function(event, d) {
+                    d3.select(this).attr('r', d.id.toLowerCase() === currentEntity.toLowerCase() ? 15 : 8);
+                    hideTooltip();
+                })
+                .on('mousemove', function(event, d) {
+                    const tooltip = document.getElementById('custom-tooltip');
+                    if (tooltip.classList.contains('visible')) {
+                        tooltip.style.left = (event.pageX + 15) + 'px';
+                        tooltip.style.top = (event.pageY + 15) + 'px';
+                    }
+                })
                 .call(d3.drag()
                     .on('start', dragstarted)
                     .on('drag', dragged)
@@ -983,11 +1247,8 @@
                 .text(d => d.id)
                 .attr('font-size', 10)
                 .attr('dx', 12)
-                .attr('dy', 4);
-
-            // Add tooltips
-            node.append('title')
-                .text(d => `${d.id}\nType: ${d.entity_type}\nFrequency: ${d.frequency}`);
+                .attr('dy', 4)
+                .style('pointer-events', 'none');
 
             // Update positions on tick
             simulation.on('tick', () => {

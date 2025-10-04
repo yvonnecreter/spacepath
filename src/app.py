@@ -18,8 +18,9 @@ from pathlib import Path
 try:
     from rag import MedicalRAGVectorStore
     from knowledgegraph import MedicalKnowledgeGraph
+    from llm_summarizer import LLMSummarizer
 except ImportError:
-    print("⚠️ Please ensure rag.py and knowledgegraph.py are in the same directory")
+    print("⚠️ Please ensure rag.py, knowledgegraph.py, and llm_summarizer.py are in the same directory")
     exit(1)
 
 app = Flask(__name__)
@@ -28,15 +29,20 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
 # Global variables
 rag_system = None
 knowledge_graph = None
+llm_summarizer = None
 
 # Configuration
 RAG_DIR = './medical_chroma_db'
 COLLECTION_NAME = 'medical_papers'
 KG_FILE = 'medical_knowledge_graph.pkl'
 
+# LLM Configuration - Change these as needed
+LLM_BACKEND = os.getenv('LLM_BACKEND', 'ollama')  # 'ollama', 'openai', or 'anthropic'
+LLM_MODEL = os.getenv('LLM_MODEL', 'granite3.3:2b')  # Model name
+
 def initialize_systems():
     """Initialize RAG and KG systems if files exist."""
-    global rag_system, knowledge_graph
+    global rag_system, knowledge_graph, llm_summarizer
     
     try:
         if os.path.exists(RAG_DIR):
@@ -65,6 +71,18 @@ def initialize_systems():
     except Exception as e:
         print(f"❌ Could not load KG: {e}")
         knowledge_graph = None
+    
+    # Initialize LLM Summarizer
+    try:
+        print(f"Initializing LLM Summarizer ({LLM_BACKEND}/{LLM_MODEL})...")
+        llm_summarizer = LLMSummarizer(backend=LLM_BACKEND, model_name=LLM_MODEL)
+        if llm_summarizer.backend:
+            print("✓ LLM Summarizer initialized")
+        else:
+            print("⚠ LLM Summarizer not available - tooltips will use fallback")
+    except Exception as e:
+        print(f"⚠ Could not initialize LLM: {e}")
+        llm_summarizer = None
 
 @app.route('/')
 def index():
@@ -288,6 +306,112 @@ def get_top_entities():
     entities.sort(key=lambda x: x['total'], reverse=True)
     
     return jsonify(entities[:30])
+
+@app.route('/api/tooltip/entity/<entity_name>')
+def get_entity_tooltip(entity_name):
+    """Generate intelligent tooltip for an entity using LLM + RAG."""
+    if not knowledge_graph or not rag_system:
+        return jsonify({'error': 'Systems not loaded'}), 400
+    
+    try:
+        # Get entity info
+        entity_info = knowledge_graph.query_entity(entity_name)
+        
+        if 'error' in entity_info:
+            return jsonify({'error': entity_info['error']}), 404
+        
+        # Search for related papers using RAG
+        papers = []
+        if rag_system:
+            try:
+                search_results = rag_system.search(entity_name, top_k=3)
+                papers = search_results
+            except:
+                pass
+        
+        # Generate summary using LLM
+        summary = None
+        if llm_summarizer and llm_summarizer.backend:
+            try:
+                summary = llm_summarizer.summarize_entity(entity_name, entity_info, papers)
+            except Exception as e:
+                print(f"LLM error: {e}")
+        
+        # Fallback summary
+        if not summary:
+            summary = f"{entity_name} is a {entity_info.get('type', 'entity')} mentioned {entity_info.get('frequency', 0)} times across {len(entity_info.get('papers', []))} papers."
+            if papers:
+                summary += f" Related research includes: {papers[0]['title'][:80]}..."
+        
+        return jsonify({
+            'entity': entity_name,
+            'type': entity_info.get('type', 'Unknown'),
+            'frequency': entity_info.get('frequency', 0),
+            'summary': summary,
+            'papers': [p['title'] for p in papers[:2]],
+            'total_papers': len(entity_info.get('papers', []))
+        })
+        
+    except Exception as e:
+        print(f"Error generating tooltip: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tooltip/relationship', methods=['POST'])
+def get_relationship_tooltip():
+    """Generate intelligent tooltip for a relationship using LLM + RAG."""
+    if not knowledge_graph or not rag_system:
+        return jsonify({'error': 'Systems not loaded'}), 400
+    
+    data = request.json
+    source = data.get('source', '')
+    target = data.get('target', '')
+    relation = data.get('relation', 'RELATED')
+    
+    if not source or not target:
+        return jsonify({'error': 'Source and target required'}), 400
+    
+    try:
+        # Search for papers mentioning both entities
+        query = f"{source} {target}"
+        papers = []
+        
+        if rag_system:
+            try:
+                search_results = rag_system.search(query, top_k=3)
+                papers = search_results
+            except:
+                pass
+        
+        # Generate summary using LLM
+        summary = None
+        if llm_summarizer and llm_summarizer.backend:
+            try:
+                summary = llm_summarizer.summarize_relationship(source, relation, target, papers)
+            except Exception as e:
+                print(f"LLM error: {e}")
+        
+        # Fallback
+        if not summary:
+            relation_text = relation.lower().replace('_', ' ')
+            summary = f"Research shows that {source} {relation_text} {target}."
+            if papers:
+                summary += f" This relationship is discussed in: {papers[0]['title'][:80]}..."
+        
+        return jsonify({
+            'source': source,
+            'target': target,
+            'relation': relation,
+            'summary': summary,
+            'supporting_papers': [p['title'] for p in papers[:2]]
+        })
+        
+    except Exception as e:
+        print(f"Error generating relationship tooltip: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/build', methods=['POST'])
 def build_system():

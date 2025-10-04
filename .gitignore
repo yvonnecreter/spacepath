@@ -12,3 +12,6 @@ wheels/
 # Misc
 DS_Store
 .python-version
+
+# ignore chroma db files
+tmp/*

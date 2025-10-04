@@ -1,0 +1,172 @@
+{
+  "N00007": {
+    "pathway": [
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "EML4-ALK -> RAS -> RAF -> MEK -> ERK -> CCND1"
+    ]
+  },
+  "N00008": {
+    "pathway": [
+      "216  Thyroid cancer",
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "RET* -> RAS -> RAF -> MEK -> ERK"
+    ]
+  },
+  "N00012": {
+    "pathway": [
+      "210  Colorectal cancer",
+      "212  Pancreatic cancer",
+      "226  Gastric cancer",
+      "216  Thyroid cancer",
+      "221  Acute myeloid leukemia",
+      "213  Endometrial cancer",
+      "223  Non-small cell lung cancer",
+      "218  Melanoma"
+    ],
+    "relations": [
+      "(KRAS*,NRAS*) -> RAF -> MEK -> ERK -> CCND1"
+    ]
+  },
+  "N00014": {
+    "pathway": [
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "EGFR* -> GRB2 -> SOS -> RAS -> RAF -> MEK -> ERK -> CCND1"
+    ]
+  },
+  "N00022": {
+    "pathway": [
+      "219  Bladder cancer",
+      "224  Breast cancer",
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "EGF -> (ERBB2*+EGFR) -> GRB2 -> SOS -> RAS -> RAF -> MEK -> ERK"
+    ]
+  },
+  "N00024": {
+    "pathway": [
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "EGFR* -> PLCG -> IP3 -> (Ca2+,DAG) -> PKC -> RAF -> MEK -> ERK -> CCND1"
+    ]
+  },
+  "N00025": {
+    "pathway": [
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "EML4-ALK -> PLCG -> IP3 -> (Ca2+,DAG) -> PKC -> RAF -> MEK -> ERK -> CCND1"
+    ]
+  },
+  "N00032": {
+    "pathway": [
+      "210  Colorectal cancer",
+      "212  Pancreatic cancer",
+      "221  Acute myeloid leukemia",
+      "223  Non-small cell lung cancer",
+      "218  Melanoma"
+    ],
+    "relations": [
+      "(KRAS*,NRAS*) -> PI3K -> PIP3 -> AKT -| BAD"
+    ]
+  },
+  "N00036": {
+    "pathway": [
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "EGFR* -> PI3K -> PIP3 -> AKT -| BAD"
+    ]
+  },
+  "N00041": {
+    "pathway": [
+      "210  Colorectal cancer",
+      "214  Glioma",
+      "219  Bladder cancer",
+      "224  Breast cancer",
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "EGFR* -> GRB2 -> SOS -> RAS -> RAF -> MEK -> ERK"
+    ]
+  },
+  "N00047": {
+    "pathway": [
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "EML4-ALK -> PI3K -> PIP3 -> AKT -| BAD"
+    ]
+  },
+  "N00070": {
+    "pathway": [
+      "212  Pancreatic cancer",
+      "220  Chronic myeloid leukemia",
+      "218  Melanoma",
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "CDKN2A* // (CCND+CDK4/6) -> RB1 // E2F"
+    ]
+  },
+  "N00097": {
+    "pathway": [
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "RAS // (RASSF1*+RASSF5) // STK4"
+    ]
+  },
+  "N00105": {
+    "pathway": [
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "EML4-ALK -> JAK3 -> STAT3,STAT5"
+    ]
+  },
+  "N00115": {
+    "pathway": [
+      "210  Colorectal cancer",
+      "212  Pancreatic cancer",
+      "225  Hepatocellular carcinoma",
+      "226  Gastric cancer",
+      "214  Glioma",
+      "220  Chronic myeloid leukemia",
+      "217  Basal cell carcinoma",
+      "218  Melanoma",
+      "216  Thyroid cancer",
+      "219  Bladder cancer",
+      "213  Endometrial cancer",
+      "224  Breast cancer",
+      "222  Small cell lung cancer",
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "TP53* // (CDKN1A,GADD45,BAX,BAK1,DDB2,POLK)"
+    ]
+  },
+  "N01062": {
+    "pathway": [
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "MET* -> GRB2 -> SOS -> RAS -> RAF -> MEK -> ERK"
+    ]
+  },
+  "N01063": {
+    "pathway": [
+      "223  Non-small cell lung cancer"
+    ],
+    "relations": [
+      "MET* -> GAB1 -> PI3K -> PIP3 -> AKT -> MTOR"
+    ]
+  }
+}

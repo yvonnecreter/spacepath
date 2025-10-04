@@ -168,13 +168,18 @@ class VanillaRAGPipeline:
                 paper_metadata["paper_type"] = "full_paper"
                 
                 # Create paper document with enhanced content for better search
+                # Limit content to reduce token usage for embeddings
+                abstract = doc.metadata.get('abstract', '')[:1000]  # Limit abstract
+                results = doc.metadata.get('results', '')[:1000]    # Limit results
+                full_text = doc.page_content[:2000]  # Further limit full text
+                
                 paper_content = f"""
                 Title: {doc.metadata['title']}
-                Abstract: {doc.metadata['abstract']}
-                Authors: {doc.metadata['authors']}
-                Keywords: {doc.metadata['keywords']}
-                Results: {doc.metadata['results']}
-                Full Text: {doc.page_content[:5000]}  # Limit full text for embedding
+                Abstract: {abstract}
+                Authors: {doc.metadata.get('authors', '')}
+                Keywords: {doc.metadata.get('keywords', '')}
+                Results: {results}
+                Full Text: {full_text}
                 """
                 
                 paper_doc = Document(
@@ -476,6 +481,21 @@ class VanillaRAGPipeline:
             max_effects=max_effects
         )
     
+    def get_vector_store_status(self):
+        """Get the status of vector stores"""
+        return {
+            "documents_initialized": self._documents_initialized,
+            "papers_initialized": self._papers_initialized,
+            "chroma_db_dir": self.chroma_db_dir
+        }
+    
+    def check_vector_stores_exist(self) -> bool:
+        """Check if vector stores already exist"""
+        chroma_db_path = os.path.join(self.chroma_db_dir, "chroma.sqlite3")
+        paper_collection_path = os.path.join(self.chroma_db_dir, "papers_chroma.sqlite3")
+        
+        return os.path.exists(chroma_db_path) and os.path.exists(paper_collection_path)
+    
     def initialize_vector_stores(self, force_rebuild: bool = False):
         """
         Initialize both vector stores if not already done.
@@ -485,6 +505,25 @@ class VanillaRAGPipeline:
         """
         logger.info("Initializing vector stores...")
         
+        # Check if stores already exist and we're not forcing rebuild
+        if not force_rebuild and self.check_vector_stores_exist():
+            logger.info("Vector stores already exist, loading existing stores...")
+            try:
+                # Try to load existing stores
+                if not self._documents_initialized:
+                    self._setup_vector_store()
+                    self._documents_initialized = True
+                
+                # if not self._papers_initialized:
+                #     self._setup_paper_vector_store()
+                #     self._papers_initialized = True
+                
+                logger.info("Existing vector stores loaded successfully")
+                return self.get_vector_store_status()
+            except Exception as e:
+                logger.warning(f"Failed to load existing stores: {e}. Rebuilding...")
+                force_rebuild = True
+        
         # Initialize document vector store
         if not self._documents_initialized or force_rebuild:
             logger.info("Setting up document vector store...")
@@ -492,10 +531,10 @@ class VanillaRAGPipeline:
             self._documents_initialized = True
         
         # Initialize paper vector store
-        if not self._papers_initialized or force_rebuild:
-            logger.info("Setting up paper vector store...")
-            self._setup_paper_vector_store()
-            self._papers_initialized = True
+        # if not self._papers_initialized or force_rebuild:
+        #     logger.info("Setting up paper vector store...")
+        #     self._setup_paper_vector_store()
+        #     self._papers_initialized = True
         
         logger.info("Vector stores initialization completed")
         return self.get_vector_store_status()        

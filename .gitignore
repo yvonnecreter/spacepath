@@ -12,3 +12,5 @@ wheels/
 # Misc
 DS_Store
 .python-version
+src/uniprot.py
+__pycache__

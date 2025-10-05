@@ -12,10 +12,10 @@ import re
 from collections import Counter
 import spacy
 from sklearn.feature_extraction.text import TfidfVectorizer
-import yake
 import json
 import uuid
 import os
+from llm_summarizer import LLMSummarizer
 
 class MedicalRAGVectorStore:
     """
@@ -49,34 +49,57 @@ class MedicalRAGVectorStore:
         self.collection = None
         self.collection_name = "medical_papers"
         
-        # Initialize keyword extractor (YAKE - Yet Another Keyword Extractor)
-        self.keyword_extractor = yake.KeywordExtractor(
-            lan="en",
-            n=3,  # max ngram size
-            dedupLim=0.9,
-            top=20,
-            features=None
-        )
-        
+        # LLM configuration for keyword extraction (proteins & pathways)
+        self.llm_backend = os.getenv('LLM_BACKEND', 'ollama')
+        self.llm_model = os.getenv('LLM_MODEL', 'granite3.3:2b')
+        try:
+            self.llm = LLMSummarizer(backend=self.llm_backend, model_name=self.llm_model)
+        except Exception:
+            self.llm = None
+
         # Try to load spaCy model for biomedical NER
         try:
             # Use scispacy for biomedical text if available
             self.nlp = spacy.load("en_core_sci_sm")
             print("✓ Loaded scispacy model for biomedical NER")
-        except:
+        except Exception:
             try:
                 # Fallback to standard spacy
                 self.nlp = spacy.load("en_core_web_sm")
                 print("✓ Loaded standard spacy model")
-            except:
+            except Exception:
                 print("⚠ Warning: spaCy model not found. Install with:")
                 print("  pip install spacy && python -m spacy download en_core_web_sm")
                 print("  For biomedical: pip install scispacy && pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_sm-0.5.1.tar.gz")
                 self.nlp = None
-        
+
         # Medical/biological terms that are important
         self.medical_pos_tags = {'NOUN', 'PROPN', 'ADJ'}
         self.stopwords = self._load_medical_stopwords()
+
+    @staticmethod
+    def define_relationship_patterns() -> List[Dict]:
+        """
+        Provide relationship patterns similar to KnowledgeGraph for reuse.
+        Useful if downstream wants to infer edges from LLM-extracted terms.
+        """
+        return [
+            {'verbs': ['cause', 'causes', 'caused', 'causing', 'induce', 'induces', 'induced'], 'relation': 'CAUSES'},
+            {'verbs': ['trigger', 'triggers', 'triggered', 'initiate', 'initiates'], 'relation': 'TRIGGERS'},
+            {'verbs': ['lead', 'leads', 'leading', 'result', 'results', 'resulting'], 'relation': 'LEADS_TO'},
+            {'verbs': ['inhibit', 'inhibits', 'inhibited', 'suppress', 'suppresses', 'block', 'blocks'], 'relation': 'INHIBITS'},
+            {'verbs': ['activate', 'activates', 'activated', 'stimulate', 'stimulates', 'enhance', 'enhances'], 'relation': 'ACTIVATES'},
+            {'verbs': ['regulate', 'regulates', 'regulated', 'modulate', 'modulates', 'control', 'controls'], 'relation': 'REGULATES'},
+            {'verbs': ['associate', 'associated', 'correlate', 'correlated', 'link', 'linked'], 'relation': 'ASSOCIATED_WITH'},
+            {'verbs': ['interact', 'interacts', 'interacted', 'bind', 'binds'], 'relation': 'INTERACTS_WITH'},
+            {'verbs': ['express', 'expresses', 'expressed', 'produce', 'produces', 'produced'], 'relation': 'EXPRESSES'},
+            {'verbs': ['increase', 'increases', 'increased', 'elevate', 'elevates', 'upregulate'], 'relation': 'INCREASES'},
+            {'verbs': ['decrease', 'decreases', 'decreased', 'reduce', 'reduces', 'downregulate'], 'relation': 'DECREASES'},
+            {'verbs': ['treat', 'treats', 'treated', 'therapy', 'therapeutic'], 'relation': 'TREATS'},
+            {'verbs': ['prevent', 'prevents', 'prevented', 'protection', 'protective'], 'relation': 'PREVENTS'},
+            {'verbs': ['involve', 'involves', 'involved', 'participate', 'participates'], 'relation': 'INVOLVED_IN'},
+            {'verbs': ['require', 'requires', 'required', 'depend', 'depends', 'dependent'], 'relation': 'REQUIRES'},
+        ]
     
     def _load_medical_stopwords(self) -> Set[str]:
         """Load common stopwords while preserving medical terms."""
@@ -169,38 +192,150 @@ class MedicalRAGVectorStore:
             print(f"Error fetching {url}: {str(e)}")
             return {'abstract': '', 'results': '', 'full_text': ''}
     
-    def extract_keywords_yake(self, text: str, top_n: int = 15) -> List[Tuple[str, float]]:
-        """Extract keywords using YAKE algorithm."""
+    def extract_keywords_llm(self, text: str, max_items: int = 25) -> Dict[str, List[str]]:
+        """
+        Extract proteins, pathways, and general keywords using an LLM.
+        Falls back to heuristics if LLM is unavailable.
+        Returns a dict: {'proteins': [...], 'pathways': [...], 'general': [...], 'all': [...]}.
+        """
         if not text:
-            return []
-        
-        keywords = self.keyword_extractor.extract_keywords(text)
-        return keywords[:top_n]
+            return {'proteins': [], 'pathways': [], 'all': []}
+
+        # If LLM available, instruct to return strict JSON
+        if getattr(self, 'llm', None) and getattr(self.llm, 'backend', None):
+            sample = text[:6000]
+            prompt = f"""
+            You are an expert biomedical text-mining assistant.
+
+            Task: From the text, extract three lists as STRICT JSON:
+            1) proteins — gene/protein names explicitly mentioned (e.g., DMD, EGFR, NADPH oxidase)
+            2) pathways — biological pathways/processes (e.g., MAPK signaling, PI3K/AKT pathway)
+            3) general_keywords — salient biomedical terms not covered above (e.g., diseases, phenotypes, mechanisms, clinical endpoints)
+
+            Rules:
+            - Only include terms present in the text; do not invent.
+            - Use concise canonical surface forms; avoid overly generic words.
+            - Return STRICT JSON with exactly these keys: "proteins", "pathways", "general_keywords".
+            - Limit to top {max_items} unique items per list.
+
+            Text:
+            {sample}
+
+            Output JSON example:
+            {{
+              "proteins": ["EGFR", "KRAS"],
+              "pathways": ["PI3K/AKT pathway"],
+              "general_keywords": ["non-small cell lung cancer", "apoptosis"]
+            }}
+            """
+
+            try:
+                resp = self.llm.generate_summary(prompt, max_tokens=400)
+                if resp:
+                    # Try direct JSON parse; if not, extract the first JSON-looking block
+                    parsed = None
+                    try:
+                        parsed = json.loads(resp)
+                    except Exception:
+                        import re as _re
+                        m = _re.search(r"\{[\s\S]*\}", resp)
+                        if m:
+                            parsed = json.loads(m.group(0))
+                    if isinstance(parsed, dict):
+                        proteins = [p.strip() for p in parsed.get('proteins', []) if isinstance(p, str)]
+                        pathways = [p.strip() for p in parsed.get('pathways', []) if isinstance(p, str)]
+                        general = [p.strip() for p in parsed.get('general_keywords', []) if isinstance(p, str)]
+                        # Deduplicate while preserving order
+                        def _dedup(seq):
+                            seen = set()
+                            out = []
+                            for s in seq:
+                                key = s.lower()
+                                if key not in seen and s:
+                                    seen.add(key)
+                                    out.append(s)
+                            return out
+                        proteins = _dedup(proteins)[:max_items]
+                        pathways = _dedup(pathways)[:max_items]
+                        general = _dedup(general)[:max_items]
+                        return {
+                            'proteins': proteins,
+                            'pathways': pathways,
+                            'general': general,
+                            'all': _dedup(proteins + pathways + general)
+                        }
+            except Exception:
+                pass
+
+        # Fallback: use spaCy entities and simple patterns as heuristic
+        proteins, pathways, general = [], [], []
+        try:
+            if self.nlp:
+                doc = self.nlp(text[:100000])
+                # Collect candidate entities and noun chunks
+                cands = set()
+                for ent in doc.ents:
+                    if ent.label_.upper() in {"GENE_OR_GENE_PRODUCT", "PROTEIN", "CHEMICAL", "ORG", "PRODUCT"}:
+                        cands.add(ent.text)
+                for chunk in doc.noun_chunks:
+                    if any(t.lower_ in {"pathway", "signaling", "signalling"} for t in chunk):
+                        cands.add(chunk.text)
+                for c in cands:
+                    cl = c.lower()
+                    if any(k in cl for k in [" pathway", "pathway ", " signaling", " signalling", "cascade", "axis"]):
+                        pathways.append(c)
+                    else:
+                        # Heuristic: uppercase-looking token as protein/gene, otherwise general
+                        if re.match(r'^[A-Z0-9-]{2,10}$', c.strip()):
+                            proteins.append(c)
+                        else:
+                            general.append(c)
+        except Exception:
+            pass
+
+        # Deduplicate and trim
+        def _dedup(seq):
+            seen = set()
+            out = []
+            for s in seq:
+                key = s.lower().strip()
+                if key and key not in seen:
+                    seen.add(key)
+                    out.append(s.strip())
+            return out
+        proteins = _dedup(proteins)[:max_items]
+        pathways = _dedup(pathways)[:max_items]
+        general = _dedup(general)[:max_items]
+        return {'proteins': proteins, 'pathways': pathways, 'general': general, 'all': _dedup(proteins + pathways + general)}
     
     def extract_keywords_spacy(self, text: str, top_n: int = 20) -> List[str]:
-        """Extract important medical terms using spaCy NER and POS tagging."""
-        if not self.nlp or not text:
+        """Extract medical keywords using local LLM (replaces spaCy heuristic).
+
+        Uses extract_keywords_llm under the hood and returns a flat list
+        of top unique keywords (proteins + pathways), up to top_n.
+        """
+        if not text:
             return []
-        
-        doc = self.nlp(text[:100000])  # Limit text length for spaCy
-        
-        keywords = []
-        
-        # Extract named entities (diseases, chemicals, proteins, etc.)
-        for ent in doc.ents:
-            if ent.text.lower() not in self.stopwords and len(ent.text) > 2:
-                keywords.append(ent.text)
-        
-        # Extract noun phrases
-        for chunk in doc.noun_chunks:
-            if (chunk.root.pos_ in self.medical_pos_tags and 
-                chunk.text.lower() not in self.stopwords and 
-                len(chunk.text) > 3):
-                keywords.append(chunk.text)
-        
-        # Count frequency
-        keyword_counts = Counter(keywords)
-        return [kw for kw, _ in keyword_counts.most_common(top_n)]
+        try:
+            llm_kws = self.extract_keywords_llm(text, max_items=top_n)
+            all_items = llm_kws.get('all') or []
+            if not all_items:
+                # Fallback: merge proteins and pathways
+                all_items = (llm_kws.get('proteins') or []) + (llm_kws.get('pathways') or [])
+            # Deduplicate while preserving order
+            seen = set()
+            out = []
+            for item in all_items:
+                key = (item or '').strip()
+                if not key:
+                    continue
+                low = key.lower()
+                if low not in seen:
+                    seen.add(low)
+                    out.append(key)
+            return out[:top_n]
+        except Exception:
+            return []
     
     def extract_keywords_tfidf(self, texts: List[str], top_n: int = 15) -> Dict[int, List[str]]:
         """Extract keywords using TF-IDF across all documents."""
@@ -240,35 +375,38 @@ class MedicalRAGVectorStore:
         combined_text = f"{abstract} {results}"
         
         keywords = {
-            'yake_keywords': [],
+            'llm_keywords': [],        # union of proteins + pathways + general
+            'llm_proteins': [],
+            'llm_pathways': [],
+            'llm_general': [],
             'spacy_entities': [],
-            'abstract_keywords': [],
-            'results_keywords': [],
+            'abstract_keywords': [],   # subset of llm_keywords that appear in abstract
+            'results_keywords': [],    # subset that appear in results
             'combined_keywords': []
         }
-        
-        # YAKE keywords from combined text
-        yake_kws = self.extract_keywords_yake(combined_text, top_n=15)
-        keywords['yake_keywords'] = [kw for kw, score in yake_kws]
-        
-        # YAKE from abstract specifically
+
+        # LLM-driven keyword extraction focused on proteins and pathways
+        llm_kws = self.extract_keywords_llm(combined_text, max_items=25)
+        keywords['llm_proteins'] = llm_kws.get('proteins', [])
+        keywords['llm_pathways'] = llm_kws.get('pathways', [])
+        keywords['llm_general'] = llm_kws.get('general', [])
+        keywords['llm_keywords'] = llm_kws.get('all', [])
+
+        # Derive per-section subsets for quick reference
+        low_abs = abstract.lower() if abstract else ''
+        low_res = results.lower() if results else ''
         if abstract:
-            abstract_yake = self.extract_keywords_yake(abstract, top_n=10)
-            keywords['abstract_keywords'] = [kw for kw, score in abstract_yake]
-        
-        # YAKE from results specifically
+            keywords['abstract_keywords'] = [k for k in keywords['llm_keywords'] if k.lower() in low_abs]
         if results:
-            results_yake = self.extract_keywords_yake(results, top_n=10)
-            keywords['results_keywords'] = [kw for kw, score in results_yake]
-        
-        # SpaCy NER
-        if self.nlp:
-            spacy_kws = self.extract_keywords_spacy(combined_text, top_n=20)
-            keywords['spacy_entities'] = spacy_kws
+            keywords['results_keywords'] = [k for k in keywords['llm_keywords'] if k.lower() in low_res]
+
+        # Replace spaCy NER with local-LLM keyword extraction
+        spacy_kws = self.extract_keywords_spacy(combined_text, top_n=20)
+        keywords['spacy_entities'] = spacy_kws
         
         # Combine all unique keywords
         all_keywords = set()
-        for key in ['yake_keywords', 'spacy_entities', 'abstract_keywords', 'results_keywords']:
+        for key in ['llm_keywords', 'spacy_entities', 'abstract_keywords', 'results_keywords']:
             all_keywords.update([kw.lower() for kw in keywords[key]])
         
         keywords['combined_keywords'] = list(all_keywords)
@@ -286,9 +424,25 @@ class MedicalRAGVectorStore:
         
         print("Phase 1: Fetching papers and extracting keywords...")
         
+        # Normalize possible metadata columns
+        possible_author_cols = [c for c in df.columns if c.lower() in {"authors", "author", "creators"}]
+        possible_date_cols = [c for c in df.columns if c.lower() in {"date", "year", "published", "publication_date"}]
+
         for idx, row in df.iterrows():
             title = row['title']
             link = row['link']
+            authors = None
+            pub_date = None
+            if possible_author_cols:
+                try:
+                    authors = str(row[possible_author_cols[0]]).strip()
+                except Exception:
+                    authors = None
+            if possible_date_cols:
+                try:
+                    pub_date = str(row[possible_date_cols[0]]).strip()
+                except Exception:
+                    pub_date = None
             
             print(f"\nProcessing {idx+1}/{len(df)}: {title[:60]}...")
             
@@ -302,8 +456,8 @@ class MedicalRAGVectorStore:
             )
             
             print(f"  Extracted {len(keywords['combined_keywords'])} unique keywords")
-            if keywords['yake_keywords']:
-                print(f"  Top keywords: {', '.join(keywords['yake_keywords'][:5])}")
+            if keywords['llm_keywords']:
+                print(f"  Top keywords: {', '.join(keywords['llm_keywords'][:5])}")
             
             # Create document with enhanced metadata
             doc = {
@@ -311,6 +465,8 @@ class MedicalRAGVectorStore:
                 'link': link,
                 'abstract': content['abstract'][:2000],
                 'results': content['results'][:3000],
+                'authors': authors,
+                'date': pub_date,
                 'keywords': keywords,
                 'text_for_embedding': self._create_enhanced_text(
                     title, 
@@ -402,8 +558,14 @@ class MedicalRAGVectorStore:
                 'link': doc['link'],
                 'abstract': doc['abstract'][:1000],  # Limit size
                 'results': doc['results'][:1000],
-                'yake_keywords': json.dumps(doc['keywords']['yake_keywords'][:10]),
+                'authors': (doc.get('authors') or '')[:500],
+                'date': (doc.get('date') or '')[:50],
+                # Keep backward-compatible key name used by the app: store LLM keywords under 'yake_keywords'
+                'yake_keywords': json.dumps(doc['keywords'].get('llm_keywords', [])[:10]),
                 'combined_keywords': json.dumps(doc['keywords']['combined_keywords'][:20]),
+                'llm_proteins': json.dumps(doc['keywords'].get('llm_proteins', [])[:20]),
+                'llm_pathways': json.dumps(doc['keywords'].get('llm_pathways', [])[:20]),
+                'llm_general': json.dumps(doc['keywords'].get('llm_general', [])[:20]),
                 'doc_index': idx
             }
             metadatas.append(metadata)
@@ -483,21 +645,66 @@ class MedicalRAGVectorStore:
             include=['metadatas', 'documents', 'distances']
         )
         
-        # Format results
+        # Format results with recency weighting (50%)
         formatted_results = []
+        current_year = time.localtime().tm_year
+
+        def parse_year(meta: dict) -> int:
+            # Try multiple fields to extract a 4-digit year
+            for k in ('date', 'year', 'published', 'publication_date'):
+                val = meta.get(k)
+                if not val:
+                    continue
+                try:
+                    # If already an int-like
+                    y = int(str(val)[:4])
+                    if 1800 <= y <= current_year + 1:
+                        return y
+                except Exception:
+                    pass
+                import re as _re
+                m = _re.search(r'(19|20)\d{2}', str(val))
+                if m:
+                    y = int(m.group(0))
+                    if 1800 <= y <= current_year + 1:
+                        return y
+            return 0
         for idx in range(len(results['ids'][0])):
             metadata = results['metadatas'][0][idx]
             
+            # Prefer LLM keywords if available; fall back to stored key
+            try:
+                top_keywords = json.loads(metadata.get('yake_keywords', '[]'))
+            except Exception:
+                top_keywords = []
+
+            distance = results['distances'][0][idx]
+            similarity = 1 - float(distance)
+            year = parse_year(metadata)
+            if year:
+                age = max(0, current_year - year)
+                # Map age 0->1.0, 10+ years -> 0.0 linearly
+                recency = max(0.0, 1.0 - min(10, age) / 10.0)
+            else:
+                recency = 0.5  # neutral if unknown
+
+            combined_score = 0.5 * similarity + 0.5 * recency
+
             formatted_results.append({
-                'title': metadata['title'],
-                'link': metadata['link'],
-                'abstract': metadata['abstract'][:300],
-                'keywords': json.loads(metadata['yake_keywords']),
-                'all_keywords': json.loads(metadata['combined_keywords'])[:15],
-                'distance': results['distances'][0][idx],
-                'document_preview': results['documents'][0][idx][:200]
+                'title': metadata.get('title', ''),
+                'link': metadata.get('link', ''),
+                'abstract': (metadata.get('abstract') or '')[:300],
+                'authors': metadata.get('authors', ''),
+                'date': metadata.get('date', ''),
+                'keywords': top_keywords,
+                'all_keywords': json.loads(metadata.get('combined_keywords', '[]'))[:15],
+                'distance': distance,
+                'score': combined_score,
+                'document_preview': (results['documents'][0][idx] or '')[:200]
             })
-        
+
+        # Sort by combined score desc
+        formatted_results.sort(key=lambda r: r.get('score', 0), reverse=True)
         return formatted_results
     
     def get_collection_stats(self) -> Dict:

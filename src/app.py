@@ -19,6 +19,7 @@ try:
     from rag import MedicalRAGVectorStore
     from knowledgegraph import MedicalKnowledgeGraph
     from llm_summarizer import LLMSummarizer
+    from uniprot import UniProtHarvester
 except ImportError:
     print("⚠️ Please ensure rag.py, knowledgegraph.py, and llm_summarizer.py are in the same directory")
     exit(1)
@@ -35,6 +36,8 @@ llm_summarizer = None
 RAG_DIR = './medical_chroma_db'
 COLLECTION_NAME = 'medical_papers'
 KG_FILE = 'medical_knowledge_graph.pkl'
+# Resolve KEGG file relative to project root (parent of this src folder)
+KEGG_FILE = str((Path(__file__).resolve().parent.parent / 'data' / 'hsa05223_network.json').resolve())
 
 # LLM Configuration - Change these as needed
 LLM_BACKEND = os.getenv('LLM_BACKEND', 'ollama')  # 'ollama', 'openai', or 'anthropic'
@@ -130,6 +133,140 @@ def reload_systems():
     initialize_systems()
     return get_status()
 
+def _parse_kegg_relations(rel_str):
+    """Parse a KEGG relation string into a list of token groups and edge type.
+
+    Example: "EGFR* -> GRB2 -> SOS -> RAS -| RAF" -> returns
+    ([{"EGFR*"}, {"GRB2"}, {"SOS"}, {"RAS"}, {"RAF"}], ["->","->","->","-|"])
+    """
+    # Normalize arrows with spaces to split reliably
+    rel_str = rel_str.replace('->', ' -> ').replace('-|', ' -| ')
+    parts = [p.strip() for p in rel_str.split() if p.strip()]
+    groups = []
+    connectors = []
+
+    current_tokens = []
+    i = 0
+    while i < len(parts):
+        token = parts[i]
+        if token in ('->', '-|'):
+            # finalize previous group
+            if current_tokens:
+                groups.append(' '.join(current_tokens))
+                current_tokens = []
+            connectors.append(token)
+        else:
+            current_tokens.append(token)
+        i += 1
+    if current_tokens:
+        groups.append(' '.join(current_tokens))
+
+    def split_group(g):
+        # remove wrapping parentheses
+        g = g.strip()
+        if g.startswith('(') and g.endswith(')'):
+            g = g[1:-1]
+        # split by comma to handle "STAT3,STAT5" cases
+        items = []
+        for part in g.split(','):
+            part = part.strip()
+            # split by '//' (parallel) into separate tokens
+            subs = [s.strip() for s in part.split('//')]
+            for sub in subs:
+                # split by '+' if present (e.g., ERBB2*+EGFR)
+                plus_parts = [pp.strip() for pp in sub.split('+')]
+                for pp in plus_parts:
+                    if pp:
+                        items.append(pp)
+        return set(items) if items else set()
+
+    node_groups = [split_group(g) for g in groups]
+    return node_groups, connectors
+
+@app.route('/api/kegg-network')
+def kegg_network():
+    """Return KEGG network from data/hsa05223_network.json as nodes/links.
+
+    - Unique entities as nodes
+    - Unidirectional edges with type 'activation' for '->' and 'inhibition' for '-|'
+    - Include pathways metadata on nodes and edges
+    """
+    try:
+        # Load file
+        if not os.path.exists(KEGG_FILE):
+            return jsonify({'error': f'KEGG file not found: {KEGG_FILE}'}), 404
+        with open(KEGG_FILE, 'r') as f:
+            raw = json.load(f)
+
+        nodes = {}
+        edges = {}
+        all_pathways = set()
+
+        for key, entry in raw.items():
+            pathways = entry.get('pathway', []) or []
+            relations = entry.get('relations', []) or []
+            for pw in pathways:
+                all_pathways.add(pw)
+
+            for rel in relations:
+                node_groups, connectors = _parse_kegg_relations(rel)
+                # Build nodes with pathways
+                for group in node_groups:
+                    for node_name in group:
+                        if not node_name:
+                            continue
+                        if node_name not in nodes:
+                            nodes[node_name] = {
+                                'id': node_name,
+                                'pathways': set()
+                            }
+                        nodes[node_name]['pathways'].update(pathways)
+
+                # Build edges for adjacent groups (cartesian product)
+                for gi in range(len(node_groups) - 1):
+                    src_group = node_groups[gi]
+                    tgt_group = node_groups[gi + 1]
+                    conn = connectors[gi] if gi < len(connectors) else '->'
+                    e_type = 'inhibition' if conn == '-|' else 'activation'
+                    for s in src_group:
+                        for t in tgt_group:
+                            if not s or not t:
+                                continue
+                            ekey = (s, t)
+                            if ekey not in edges:
+                                edges[ekey] = {
+                                    'source': s,
+                                    'target': t,
+                                    'type': e_type,
+                                    'pathways': set(),
+                                    'keys': set(),
+                                }
+                            edges[ekey]['pathways'].update(pathways)
+                            edges[ekey]['keys'].add(key)
+
+        # Convert sets to lists for JSON
+        nodes_list = []
+        for n in nodes.values():
+            n['pathways'] = sorted(list(n['pathways']))
+            nodes_list.append(n)
+
+        links_list = []
+        for e in edges.values():
+            e['pathways'] = sorted(list(e['pathways']))
+            e['keys'] = sorted(list(e['keys']))
+            links_list.append(e)
+
+        result = {
+            'nodes': nodes_list,
+            'links': links_list,
+            'pathways': sorted(list(all_pathways))
+        }
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/search', methods=['POST'])
 def search():
     """Semantic search endpoint."""
@@ -147,6 +284,60 @@ def search():
         results = rag_system.search(query, top_k=top_k)
         return jsonify({'results': results})
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/search-summary', methods=['POST'])
+def search_summary():
+    """LLM-generated summary over papers for a given query.
+
+    Body JSON: { query: str, top_k: int }
+    Returns: { summary: str, total: int }
+    """
+    if not rag_system:
+        return jsonify({'error': 'RAG system not loaded'}), 400
+
+    data = request.json or {}
+    query = data.get('query', '').strip()
+    top_k = int(data.get('top_k', 8))
+    if not query:
+        return jsonify({'error': 'Query is required'}), 400
+
+    try:
+        results = rag_system.search(query, top_k=top_k)
+        total = len(results)
+
+        # Build a concise multi-paper prompt
+        context_lines = [f"Query: {query}", f"Papers ({min(total, 8)} shown):"]
+        for i, r in enumerate(results[:8], 1):
+            title = r.get('title', '')
+            abstract = r.get('abstract', '')
+            context_lines.append(f"{i}. {title}\n   {abstract[:220]}...")
+        context = "\n".join(context_lines)
+
+        prompt = (
+            f"{context}\n\n"
+            "Summarize the main themes and findings across these papers in 3-5 concise sentences. "
+            "Highlight key mechanisms, entities, and any clinical significance."
+        )
+
+        summary = None
+        if llm_summarizer and llm_summarizer.backend:
+            try:
+                summary = llm_summarizer.generate_summary(prompt, max_tokens=260)
+            except Exception as e:
+                print(f"LLM search summary error: {e}")
+
+        if not summary:
+            # Fallback simple summary
+            titles = "; ".join([r.get('title', '') for r in results[:5]])
+            summary = (
+                f"Found {total} papers related to '{query}'. Representative works include: {titles}. "
+                "Themes involve mechanisms and relationships among key entities reported in the literature."
+            )
+
+        return jsonify({'summary': summary, 'total': total})
+    except Exception as e:
+        print("Error generating search summary", e)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/entity/<entity_name>')
@@ -209,6 +400,9 @@ def get_subgraph(entity_name):
                 if isinstance(papers, set):
                     papers = list(papers)
                 node_data['papers'] = papers[:5]  # Limit for size
+                # include sources and domains for front-end shape mapping
+                node_data['sources'] = list(node_attrs.get('sources', set()))
+                node_data['domains'] = list(node_attrs.get('domains', set()))
         
         # Add edge attributes
         for link in data['links']:
@@ -309,49 +503,73 @@ def get_top_entities():
 
 @app.route('/api/tooltip/entity/<entity_name>')
 def get_entity_tooltip(entity_name):
-    """Generate intelligent tooltip for an entity using LLM + RAG."""
-    if not knowledge_graph or not rag_system:
-        return jsonify({'error': 'Systems not loaded'}), 400
-    
+    """Generate tooltip content for a keyword/entity using RAG (and KG if available).
+
+    Works even if the entity is not present in the Knowledge Graph by
+    summarizing top related papers from the RAG collection.
+    """
+    if not rag_system and not knowledge_graph:
+        return jsonify({'error': 'No systems loaded'}), 400
+
     try:
-        # Get entity info
-        entity_info = knowledge_graph.query_entity(entity_name)
-        
-        if 'error' in entity_info:
-            return jsonify({'error': entity_info['error']}), 404
-        
-        # Search for related papers using RAG
+        # Optional KG lookup
+        entity_info = {
+            'type': 'Unknown',
+            'frequency': 0,
+            'papers': []
+        }
+        if knowledge_graph:
+            try:
+                q = knowledge_graph.query_entity(entity_name)
+                if 'error' not in q:
+                    entity_info.update({
+                        'type': q.get('type', 'Unknown'),
+                        'frequency': q.get('frequency', 0),
+                        'papers': q.get('papers', [])
+                    })
+            except Exception as e:
+                # Non-fatal if entity not in KG
+                pass
+
+        # RAG search to gather related papers
         papers = []
         if rag_system:
             try:
-                search_results = rag_system.search(entity_name, top_k=3)
-                papers = search_results
-            except:
-                pass
-        
-        # Generate summary using LLM
+                papers = rag_system.search(entity_name, top_k=5)
+            except Exception as e:
+                print(f"RAG search error in tooltip: {e}")
+
+        # Build LLM prompt from RAG results if LLM available
         summary = None
-        if llm_summarizer and llm_summarizer.backend:
+        if llm_summarizer and llm_summarizer.backend and papers:
             try:
-                summary = llm_summarizer.summarize_entity(entity_name, entity_info, papers)
+                context_lines = [f"Keyword: {entity_name}", "Related Papers:"]
+                for i, p in enumerate(papers[:5], 1):
+                    context_lines.append(f"{i}. {p.get('title','')}")
+                    if p.get('abstract'):
+                        context_lines.append(f"   {p['abstract'][:220]}...")
+                prompt = "\n".join(context_lines) + "\n\nSummarize how this keyword appears across these papers in 2-3 sentences. Focus on mechanisms and relevance."
+                summary = llm_summarizer.generate_summary(prompt, max_tokens=180)
             except Exception as e:
                 print(f"LLM error: {e}")
-        
+
         # Fallback summary
         if not summary:
-            summary = f"{entity_name} is a {entity_info.get('type', 'entity')} mentioned {entity_info.get('frequency', 0)} times across {len(entity_info.get('papers', []))} papers."
             if papers:
-                summary += f" Related research includes: {papers[0]['title'][:80]}..."
-        
+                p0 = papers[0]
+                summary = f"Found {len(papers)} related papers for '{entity_name}'. Example: {p0.get('title','')[:80]}..."
+            else:
+                summary = f"'{entity_name}' appears {entity_info.get('frequency', 0)} times in the knowledge graph."
+
         return jsonify({
             'entity': entity_name,
             'type': entity_info.get('type', 'Unknown'),
             'frequency': entity_info.get('frequency', 0),
             'summary': summary,
-            'papers': [p['title'] for p in papers[:2]],
+            'papers': [p.get('title','') for p in papers[:3]],
             'total_papers': len(entity_info.get('papers', []))
         })
-        
+
     except Exception as e:
         print(f"Error generating tooltip: {e}")
         import traceback
@@ -457,6 +675,77 @@ def build_system():
             }
         })
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/uniprot/ingest', methods=['POST'])
+def ingest_uniprot():
+    """Ingest UniProt EGFR (or custom) into vector store and KG.
+
+    Body JSON (optional): {"query":"Egfr", "organism":"human"}
+    """
+    try:
+        data = request.json or {}
+        query = data.get('query', 'Egfr')
+        organism = data.get('organism', 'human')
+
+        # Ensure RAG/KG structures exist
+        persist_dir = RAG_DIR
+        collection = COLLECTION_NAME
+
+        # Store top UniProt result into vector store
+        harvester = UniProtHarvester(persist_directory=persist_dir, collection_name=collection)
+        store_summary = harvester.store_top_egfr_in_vectorstore() if (query.lower()=="egfr" and organism.lower()=="human") else None
+
+        # Always gather info so we can add interactions into KG
+        info = harvester.gather_egfr_human() if (query.lower()=="egfr" and organism.lower()=="human") else harvester.gather_egfr_human()
+
+        # Initialize KG if needed
+        global knowledge_graph
+        if not knowledge_graph:
+            knowledge_graph = MedicalKnowledgeGraph()
+            # If an existing KG file is present, load it to append
+            if os.path.exists(KG_FILE):
+                try:
+                    knowledge_graph.load_graph(KG_FILE)
+                except Exception:
+                    pass
+
+        # Align KG patterns with RAG, if available
+        try:
+            patterns = MedicalRAGVectorStore.define_relationship_patterns()
+            knowledge_graph.set_relationship_patterns(patterns)
+        except Exception:
+            pass
+
+        # Add UniProt interactions
+        added = knowledge_graph.add_uniprot_interactions(info)
+
+        # Save/Export KG
+        knowledge_graph.save_graph(KG_FILE)
+        knowledge_graph.export_to_json('medical_knowledge_graph.json')
+
+        # Optionally refresh RAG system collection handle
+        global rag_system
+        if rag_system:
+            try:
+                rag_system.load_collection(collection)
+            except Exception:
+                pass
+
+        return jsonify({
+            'success': True,
+            'stored_to_vectorstore': bool(store_summary and store_summary.get('stored')),
+            'vectorstore_summary': store_summary,
+            'uniprot_accession': info.get('accession'),
+            'uniprot_gene': info.get('gene_name'),
+            'uniprot_protein': info.get('protein_name'),
+            'interactions_added': added,
+            'kg_entities': knowledge_graph.graph.number_of_nodes(),
+            'kg_relationships': knowledge_graph.graph.number_of_edges(),
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

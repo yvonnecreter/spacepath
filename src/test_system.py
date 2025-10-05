@@ -6,6 +6,7 @@ Usage:
     python test_system.py build papers.csv      # Build from CSV
     python test_system.py test                  # Test existing system
     python test_system.py status                # Check status
+    python test_system.py ingest-egfr           # Ingest UniProt EGFR
 """
 
 import sys
@@ -247,6 +248,7 @@ def main():
         print("  python test_system.py build papers.csv    # Build from CSV")
         print("  python test_system.py test                # Test existing system")
         print("  python test_system.py check               # Check dependencies")
+        print("  python test_system.py ingest-egfr        # Ingest UniProt EGFR (human) into RAG + KG")
         return
     
     command = sys.argv[1].lower()
@@ -288,6 +290,44 @@ def main():
             return
         test_system()
         
+    elif command in ['ingest-egfr', 'ingest_egfr']:
+        # Ingest UniProt EGFR and update RAG/KG
+        try:
+            from uniprot import UniProtHarvester
+            from rag import MedicalRAGVectorStore
+            from knowledgegraph import MedicalKnowledgeGraph
+
+            # Store to vector store
+            harv = UniProtHarvester(persist_directory='./medical_chroma_db', collection_name='medical_papers')
+            store_summary = harv.store_top_egfr_in_vectorstore()
+            print("\nVector store summary:")
+            print(store_summary)
+
+            # Update KG with interactions
+            info = harv.gather_egfr_human()
+            kg = MedicalKnowledgeGraph()
+            if os.path.exists('medical_knowledge_graph.pkl'):
+                try:
+                    kg.load_graph('medical_knowledge_graph.pkl')
+                except Exception:
+                    pass
+
+            # Align patterns with RAG
+            try:
+                kg.set_relationship_patterns(MedicalRAGVectorStore.define_relationship_patterns())
+            except Exception:
+                pass
+
+            added = kg.add_uniprot_interactions(info)
+            kg.save_graph('medical_knowledge_graph.pkl')
+            kg.export_to_json('medical_knowledge_graph.json')
+            print(f"\nAdded {added} interaction edges for EGFR from UniProt.")
+            print("Done.")
+        except Exception as e:
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return
     else:
         print(f"Unknown command: {command}")
         print("Available commands: check, status, build, test")

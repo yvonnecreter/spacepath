@@ -22,3 +22,15 @@ tmp/*
 
 # ignore ipynb files
 *.ipynb
+
+# ignore node modules
+node_modules/
+
+# ignore dist
+dist/
+
+# ignore build
+build/
+
+# ignore .env
+.env

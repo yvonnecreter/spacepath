@@ -144,6 +144,16 @@ def create_app():
             logger.error(f"Error getting research summary: {e}")
             raise HTTPException(status_code=500, detail=f"Error getting research summary: {str(e)}")
 
+    @app.post("/get-pathways")
+    async def get_pathways(request: ProteinRequest):
+        """Get pathways for a specific protein"""
+        try:
+            pathways = workflow_service.get_pathways_for_protein(request.protein_name)
+            return pathways
+        except Exception as e:
+            logger.error(f"Error getting pathways: {e}")
+            raise HTTPException(status_code=500, detail=f"Error getting pathways: {str(e)}")
+
     @app.get("/health")
     async def health_check():
         """Health check endpoint"""

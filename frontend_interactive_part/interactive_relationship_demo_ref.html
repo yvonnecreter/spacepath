@@ -1,0 +1,83 @@
+<!doctype html>
+<html><head>
+<meta charset="utf-8"/>
+<title>Space Path – EGFR graph</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+ body {margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+ .wrap{display:flex;height:100vh}
+ #net{flex:1 1 auto;border-right:1px solid #eee}
+ #side{width:380px;padding:16px}
+ h3{margin:8px 0 12px}
+ .pill{display:inline-block;padding:2px 8px;margin:2px;border-radius:12px;font-size:12px;background:#f2f2f2}
+ .note{font-size:12px;color:#666;margin-top:10px}
+</style></head>
+<body>
+<div class="wrap">
+  <div id="net"></div>
+  <div id="side">
+    <h3>Confidence (NASA vs Clinical)</h3>
+    <canvas id="bars" width="360" height="320"></canvas>
+    <div style="margin-top:8px">
+      <span class="pill" style="background:#e8fff7">Protein</span>
+      <span class="pill" style="background:#f0fff0">Pathway</span>
+      <span class="pill" style="background:#e3f2fd">Condition</span>
+      <span class="pill" style="background:#e0f7fa">Outcome</span>
+      <span class="pill" style="background:#fde2e4">Drug</span>
+      <span class="pill" style="background:#ede7f6">Trial</span>
+      <span class="pill" style="background:#eeeeee">Evidence</span>
+    </div>
+    <div class="note">Query: <b>EGFR in microgravity</b><br/>Edge labels show relations; node size scales with evidence weight.</div>
+  </div>
+</div>
+<script>
+const nodes = [{"id": "EGFR", "type": "Protein", "value": 37}, {"id": "ERBB1", "type": "Synonym", "value": 4}, {"id": "HER1", "type": "Synonym", "value": 4}, {"id": "MAPK Pathway", "type": "Pathway", "value": 8}, {"id": "PI3K-AKT Pathway", "type": "Pathway", "value": 6}, {"id": "Microgravity", "type": "Condition", "value": 11}, {"id": "Cell Proliferation", "type": "Outcome", "value": 6}, {"id": "Osimertinib", "type": "Drug", "value": 16}, {"id": "NSCLC Trials", "type": "Trial", "value": 6}, {"id": "NASA Papers", "type": "Evidence", "value": 1}, {"id": "ClinicalTrials.gov", "type": "Evidence", "value": 1}];
+const edges = [{"from": "EGFR", "to": "ERBB1", "label": "aliases", "weight": 4, "refs": []}, {"from": "EGFR", "to": "HER1", "label": "aliases", "weight": 4, "refs": []}, {"from": "EGFR", "to": "MAPK Pathway", "label": "participates_in", "weight": 8, "refs": []}, {"from": "EGFR", "to": "PI3K-AKT Pathway", "label": "participates_in", "weight": 6, "refs": []}, {"from": "EGFR", "to": "Microgravity", "label": "affected_by", "weight": 5, "refs": []}, {"from": "Microgravity", "to": "Cell Proliferation", "label": "leads_to", "weight": 6, "refs": []}, {"from": "EGFR", "to": "Osimertinib", "label": "targeted_by", "weight": 10, "refs": []}, {"from": "Osimertinib", "to": "NSCLC Trials", "label": "studied_in", "weight": 6, "refs": []}, {"from": "EGFR", "to": "NASA Papers", "label": "reported_in", "weight": 0, "refs": []}, {"from": "EGFR", "to": "ClinicalTrials.gov", "label": "linked_to", "weight": 0, "refs": []}];
+const conf  = [{"term": "EGFR", "nasa": 80, "clinical": 95}, {"term": "MAPK Pathway", "nasa": 65, "clinical": 60}, {"term": "PI3K-AKT Pathway", "nasa": 60, "clinical": 55}, {"term": "Microgravity", "nasa": 95, "clinical": 35}, {"term": "Cell Proliferation", "nasa": 70, "clinical": 60}, {"term": "Osimertinib", "nasa": 25, "clinical": 95}, {"term": "NSCLC Trials", "nasa": 20, "clinical": 98}];
+
+const container = document.getElementById('net');
+const data = {
+  nodes: new vis.DataSet(nodes.map(n=>({
+    id:n.id,label:n.id,group:n.type,value:n.value
+  }))),
+  edges: new vis.DataSet(edges.map(e=>({
+    from:e.from,to:e.to,arrows:'to',label:e.label,width:1+0.2*(e.weight||1),font:{align:'top'},
+    title:(e.refs && e.refs.length? 'Refs:\n'+e.refs.join('\n') : '')
+  })))
+};
+const options = {
+  nodes: { shape:'dot', scaling:{min:6,max:40}, font:{size:14} },
+  groups: {
+    Protein:  { color:'#f4a261' },
+    Synonym:  { color:'#bdbdbd' },
+    Pathway:  { color:'#6fcf97' },
+    Condition:{ color:'#56ccf2' },
+    Outcome:  { color:'#2dd4bf' },
+    Drug:     { color:'#f06292' },
+    Trial:    { color:'#9b59b6' },
+    Evidence: { color:'#90a4ae' }
+  },
+  edges: { color:{color:'#808080'}, smooth:true },
+  physics: { barnesHut:{gravitationalConstant:-25000}, stabilization:{iterations:150} }
+};
+new vis.Network(container, data, options);
+
+// bars
+const labels = (conf.length? conf.map(x=>x.term): ["EGFR"]);
+const nasa   = (conf.length? conf.map(x=>x.nasa): [80]);
+const clin   = (conf.length? conf.map(x=>x.clinical): [95]);
+new Chart(document.getElementById('bars').getContext('2d'), {
+  type:'bar',
+  data:{ labels:labels, datasets:[
+    { label:'NASA', data:nasa, backgroundColor:'#2a9d8f' },
+    { label:'Clinical', data:clin, backgroundColor:'#e76f51' }
+  ]},
+  options:{
+    responsive:true, plugins:{legend:{position:'bottom'}},
+    scales:{ x:{stacked:true}, y:{stacked:true, beginAtZero:true, max:100, title:{display:true,text:'Confidence (%)'}} }
+  }
+});
+</script>
+</body></html>

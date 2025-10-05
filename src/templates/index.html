@@ -575,8 +575,8 @@
             <p>Explore medical microgravity research with AI-powered semantic search and knowledge graphs.</p>
         </div>
     </div>
-
-    <!-- Status Bar -->
+                    
+    {% if demo_mode %}
     <div class="status-bar">
         <div class="status-content">
             <div class="status-badges">
@@ -597,6 +597,10 @@
             </div>
         </div>
     </div>
+    {% else %}
+    <div id="stats-display"></div>
+    {% endif %}
+</div>
 
     <!-- Main Container -->
     <div class="container">
@@ -618,7 +622,7 @@
             <button class="tab active" onclick="switchTab('search')">🔍 Search</button>
             <button class="tab" onclick="switchTab('graph')">🕸️ Knowledge Graph</button>
             <button class="tab" onclick="switchTab('analytics')">📊 Analytics</button>
-            <button class="tab" onclick="switchTab('build')">⚙️ Build System</button>
+            {% if demo_mode %}<button class="tab" onclick="switchTab('build')">⚙️ Build System</button>{% endif %}
         </div>
 
         <!-- Search Tab -->
@@ -634,7 +638,7 @@
                     <div class="card" id="rag-summary-card">
                         <h2 class="card-title">RAG Summary</h2>
                         <div id="rag-summary" style="line-height:1.5; color: var(--text-dark);">
-                            <div class="loading active">
+                            <div class="loading">
                                 <div class="spinner"></div>
                                 <p>Loading RAG summary...</p>
                             </div>
@@ -663,6 +667,20 @@
         <!-- Knowledge Graph Tab -->
         <div id="graph-tab" class="tab-content">
             <div class="card">
+                <h2 class="card-title">Interactive Network Graph</h2>
+                <div class="graph-container">
+                    {% if demo_mode %}
+                    <svg id="graph-canvas"></svg>
+                    
+                    {% else %}
+                    <!-- Demo mode: render the interactive relationship demo instead of KG window -->
+                    <iframe src="{{ url_for('demo_relationship') }}" title="Interactive Relationship Demo" style="width:100%; height:100%; border:none;"></iframe>
+                    <!-- Keep a hidden SVG to avoid JS errors from graph code trying to select this element -->
+                    <svg id="graph-canvas" style="display:none"></svg>
+                    {% endif %}
+                </div>
+            </div>
+            <!-- <div class="card">
                 <h2 class="card-title">Entity Explorer</h2>
                 <div class="search-box">
                     <input type="number" id="graph-depth" class="input" 
@@ -670,17 +688,10 @@
                     <button class="btn btn-primary" onclick="exploreEntity()">
                         🔍 Explore
                     </button>
-                </div>
-            </div>
+                </div> -->
+            
 
-            <div id="entity-info"></div>
-
-            <div class="card">
-                <h2 class="card-title">Interactive Network Graph</h2>
-                <div class="graph-container">
-                    <svg id="graph-canvas"></svg>
-                </div>
-            </div>
+            <!-- <div id="entity-info"></div> -->
 
             <!-- KEGG card moved to Search tab -->
 
@@ -726,6 +737,7 @@
             </div>
         </div>
 
+        {% if demo_mode %}
         <!-- Build System Tab -->
         <div id="build-tab" class="tab-content">
             <div class="card">
@@ -745,6 +757,7 @@
                 <div id="build-progress" style="margin-top: 1.5rem;"></div>
             </div>
         </div>
+        {% endif %}
     </div>
 
     <!-- Custom Tooltip -->

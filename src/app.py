@@ -33,7 +33,7 @@ knowledge_graph = None
 llm_summarizer = None
 
 # Configuration
-RAG_DIR = './medical_chroma_db'
+RAG_DIR = './chroma_backup'
 COLLECTION_NAME = 'medical_papers'
 KG_FILE = 'medical_knowledge_graph.pkl'
 # Resolve KEGG file relative to project root (parent of this src folder)
@@ -89,8 +89,24 @@ def initialize_systems():
 
 @app.route('/')
 def index():
-    """Main page."""
-    return render_template('index.html')
+    """Main page.
+
+    If demo mode is enabled (via query param `demo-mode=true` or env `DEMO_MODE`),
+    the template will conditionally embed the interactive relationship demo instead
+    of the regular Knowledge Graph window.
+    """
+    # Determine demo mode from query param or environment
+    q = (request.args.get('demo-mode') or '').strip().lower()
+    env_demo = (os.getenv('DEMO_MODE') or '').strip().lower()
+    truthy = {'1', 'true', 'yes', 'on'}
+    demo_mode = (q in truthy) or (env_demo in truthy)
+
+    return render_template('index.html', demo_mode=demo_mode)
+
+@app.route('/demo-relationship')
+def demo_relationship():
+    """Serve the interactive relationship demo page as a standalone view."""
+    return render_template('interactive_relationship_demo_ref.html')
 
 @app.route('/api/status')
 def get_status():

@@ -64,13 +64,6 @@ export const ClinicalTrialsList = ({ clinicalStudies = [], isLoading = false }: 
               </button>
             </div>
 
-            {/* NCT ID */}
-            <div className="mb-4">
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <ExternalLink className="h-4 w-4" />
-                <span className="font-mono">{study.nct_id}</span>
-              </div>
-            </div>
 
             {/* Expandable Summary */}
             {expandedId === (study.nct_id || index.toString()) && study.brief_summary && (
@@ -96,7 +89,7 @@ export const ClinicalTrialsList = ({ clinicalStudies = [], isLoading = false }: 
                 <span className="font-mono">{study.nct_id}</span>
               </a>
               
-              <a
+              {/* <a
                 href={study.link}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -104,7 +97,7 @@ export const ClinicalTrialsList = ({ clinicalStudies = [], isLoading = false }: 
               >
                 <ExternalLink className="h-3.5 w-3.5" />
                 <span>View on ClinicalTrials.gov</span>
-              </a>
+              </a> */}
             </div>
           </div>
         </Card>

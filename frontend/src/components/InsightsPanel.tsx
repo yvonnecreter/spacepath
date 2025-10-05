@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChatMessage } from "@/types/chat";
 import { Loader2, CheckCircle, AlertCircle } from "lucide-react";
+import { TruncatedText } from "@/components/ui/truncated-text";
 
 interface InsightsPanelProps {
   messages: ChatMessage[];
@@ -25,7 +26,37 @@ export const InsightsPanel = ({ messages }: InsightsPanelProps) => {
       
       <ScrollArea className="flex-1">
         <div ref={scrollRef} className="p-6 space-y-6">
-          {messages.map((message) => (
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center space-y-6">
+              <div className="space-y-4">
+                <h3 className="text-3xl font-bold text-foreground">
+                  SpacePath
+                </h3>
+                <p className="text-lg text-muted-foreground max-w-md">
+                  Turning NASA's space biology data into actionable insights for pharma and life sciences.
+                </p>
+              </div>
+              
+              <div className="space-y-4 w-full max-w-lg">
+                <p className="text-sm font-medium text-foreground">
+                  Ask questions like:
+                </p>
+                <div className="space-y-3">
+                  <div className="bg-secondary/50 border border-border rounded-lg p-4 text-left">
+                    <p className="text-sm text-foreground font-mono">
+                      "How does microgravity affect EGFR?"
+                    </p>
+                  </div>
+                  <div className="bg-secondary/50 border border-border rounded-lg p-4 text-left">
+                    <p className="text-sm text-foreground font-mono">
+                      "Show protein pathways altered in space conditions."
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            messages.map((message) => (
             <div key={message.id} className="animate-fade-in">
               {message.role === 'user' ? (
                 <Card className="bg-secondary border-border shadow-sm p-4 ml-auto max-w-[85%]">
@@ -34,7 +65,7 @@ export const InsightsPanel = ({ messages }: InsightsPanelProps) => {
               ) : (
                 <div className="space-y-4 max-w-full">
                   {/* Loading States */}
-                  {message.isLoading && (
+                  {message.isLoading && (message.isLoading.proteinInfo || message.isLoading.pathways || message.isLoading.researchSummary) && (
                     <Card className="bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20 shadow-lg p-6 space-y-4">
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -110,9 +141,12 @@ export const InsightsPanel = ({ messages }: InsightsPanelProps) => {
                             <h3 className="font-bold text-foreground mb-2">Functions:</h3>
                             <div className="space-y-2">
                               {message.proteinInfo.functions.map((func, idx) => (
-                                <p key={idx} className="text-sm text-foreground">
-                                  {func}
-                                </p>
+                                <TruncatedText 
+                                  key={idx} 
+                                  text={func}
+                                  maxSentences={2}
+                                  className="text-sm text-foreground"
+                                />
                               ))}
                             </div>
                           </div>
@@ -132,26 +166,25 @@ export const InsightsPanel = ({ messages }: InsightsPanelProps) => {
                         <p className="text-sm leading-relaxed text-foreground">
                           {message.researchSummary.summary}
                         </p>
-                        {message.researchSummary.relevant_papers.length > 0 && (
-                          <div>
-                            <h4 className="font-semibold text-foreground mb-2">Relevant Papers:</h4>
-                            <div className="space-y-1">
+                        <div className="flex justify-between items-end">
+                          <div className="text-xs text-muted-foreground">
+                            {/* Sources: {message.researchSummary.source_count} */}
+                          </div>
+                          {message.researchSummary.relevant_papers.length > 0 && (
+                            <div className="flex gap-1">
                               {message.researchSummary.relevant_papers.map((paper, idx) => (
                                 <a 
                                   key={idx} 
                                   href={paper} 
                                   target="_blank" 
                                   rel="noopener noreferrer"
-                                  className="block text-sm text-primary hover:underline"
+                                  className="text-xs text-primary hover:underline font-mono"
                                 >
-                                  {paper}
+                                  [{idx + 1}]
                                 </a>
                               ))}
                             </div>
-                          </div>
-                        )}
-                        <div className="text-xs text-muted-foreground">
-                          Sources: {message.researchSummary.source_count}
+                          )}
                         </div>
                       </div>
                     </Card>
@@ -175,9 +208,11 @@ export const InsightsPanel = ({ messages }: InsightsPanelProps) => {
                         </ol>
                         <div className="pt-2">
                           <span className="font-bold text-foreground">Functions:</span>
-                          <span className="text-sm text-foreground ml-1">
-                            {message.proteinData.functions}
-                          </span>
+                          <TruncatedText 
+                            text={message.proteinData.functions}
+                            maxSentences={2}
+                            className="text-sm text-foreground ml-1"
+                          />
                         </div>
                       </div>
 
@@ -199,8 +234,8 @@ export const InsightsPanel = ({ messages }: InsightsPanelProps) => {
                     </Card>
                   )}
 
-                  {/* Basic content if no structured data */}
-                  {message.content && !message.proteinInfo && !message.proteinData && (
+                  {/* Basic content if no structured data - only show if no research summary */}
+                  {message.content && !message.proteinInfo && !message.proteinData && !message.researchSummary && (
                     <Card className="bg-white border border-border shadow-sm p-4">
                       <p className="text-sm text-foreground">{message.content}</p>
                     </Card>
@@ -208,7 +243,8 @@ export const InsightsPanel = ({ messages }: InsightsPanelProps) => {
                 </div>
               )}
             </div>
-          ))}
+          ))
+          )}
         </div>
       </ScrollArea>
     </div>

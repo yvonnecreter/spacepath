@@ -6,30 +6,7 @@ import { ChatMessage } from "@/types/chat";
 import { useQueryWorkflow } from "@/hooks/useQueryWorkflow";
 
 const Index = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: '1',
-      role: 'user',
-      content: 'What happens to EGFR in microgravity?',
-      timestamp: new Date(),
-    },
-    {
-      id: '2',
-      role: 'assistant',
-      content: '',
-      timestamp: new Date(),
-      proteinData: {
-        name: 'EGFR',
-        alternateNames: [
-          'Proto-oncogene c-ErbB-1',
-          'Receptor tyrosine-protein kinase erbB-1',
-        ],
-        functions: 'Receptor tyrosine kinase binding ligands of the EGF family and activating several signaling pathways...',
-        summary: 'In microgravity, epidermal growth factor receptor (EGFR) signal transduction is inhibited downstream of receptor redistribution, leading to suppressed early gene expression like c-fos and c-jun. This inhibition appears to stem from microgravity\'s impact on the actin cytoskeleton and protein kinase C (PKC) signaling, as EGFR binding and clustering are not significantly affected.',
-        sources: ['[1]', '[2]', '[3]'],
-      },
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const { processQuery, isLoading, error } = useQueryWorkflow();
 

@@ -82,6 +82,9 @@ export const useQueryWorkflow = () => {
         assistantMessage.content = `I found information about ${proteinName}, but I'm having trouble generating a research summary. Please try again.`;
       }
 
+      // Mark all loading as complete - remove isLoading to hide loading state
+      assistantMessage.isLoading = undefined;
+
       setState({
         isLoading: false,
         error: null,

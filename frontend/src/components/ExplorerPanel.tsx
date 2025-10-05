@@ -10,7 +10,7 @@ interface ExplorerPanelProps {
 }
 
 export const ExplorerPanel = ({ messages }: ExplorerPanelProps) => {
-  const [activeTab, setActiveTab] = useState("relationships");
+  const [activeTab, setActiveTab] = useState("pathways");
 
   // Get the latest assistant message with data
   const latestMessage = messages
@@ -27,12 +27,7 @@ export const ExplorerPanel = ({ messages }: ExplorerPanelProps) => {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
         <div className="px-6 pt-6">
           <TabsList className="grid w-full grid-cols-3 bg-white border border-border shadow-sm">
-            <TabsTrigger 
-              value="relationships"
-              className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-lg transition-all"
-            >
-              Relationships
-            </TabsTrigger>
+
             <TabsTrigger 
               value="pathways"
               className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-lg transition-all"
@@ -45,10 +40,17 @@ export const ExplorerPanel = ({ messages }: ExplorerPanelProps) => {
             >
               Clinical Trials
             </TabsTrigger>
+            <TabsTrigger 
+              value="relationships"
+              className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-lg transition-all"
+            >
+              Relationships
+            </TabsTrigger>
+
           </TabsList>
         </div>
 
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-auto">
           <TabsContent value="relationships" className="h-full mt-0 p-6">
             <RelationshipsGraph />
           </TabsContent>

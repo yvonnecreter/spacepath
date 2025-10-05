@@ -11,7 +11,7 @@ QUERY     = "EGFR in microgravity"
 NASA_CSV  = "nasa_papers.csv"          # columns: Title, Abstract(optional), Link
 TRIALS_CSV= "clinicaltrials.csv"       # columns: Title, Summary(optional), Link
 USE_GPT   = True                       # set False to use rule-based fallback
-MODEL     = "gpt-4o"                   # summarizer/extractor
+MODEL     = "gpt-4o-mini"                   # summarizer/extractor
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # set in env
 
 # --------- helpers: load data ----------

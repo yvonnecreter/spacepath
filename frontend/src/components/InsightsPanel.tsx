@@ -30,7 +30,7 @@ export const InsightsPanel = ({ messages }: InsightsPanelProps) => {
             <div className="flex flex-col items-center justify-center h-full text-center space-y-6">
               <div className="space-y-4">
                 <h3 className="text-3xl font-bold text-foreground">
-                  SpacePath
+                  ProteinLens - By SpacePath
                 </h3>
                 <p className="text-lg text-muted-foreground max-w-md">
                   Turning NASA's space biology data into actionable insights for pharma and life sciences.
@@ -44,12 +44,12 @@ export const InsightsPanel = ({ messages }: InsightsPanelProps) => {
                 <div className="space-y-3">
                   <div className="bg-secondary/50 border border-border rounded-lg p-4 text-left">
                     <p className="text-sm text-foreground font-mono">
-                      "How does microgravity affect EGFR?"
+                      "How do inflammatory cytokines like TNF-α and IL-6 change in microgravity?"
                     </p>
                   </div>
                   <div className="bg-secondary/50 border border-border rounded-lg p-4 text-left">
                     <p className="text-sm text-foreground font-mono">
-                      "Show protein pathways altered in space conditions."
+                      "How does BDNF expression change in neural stem cells during spaceflight?"
                     </p>
                   </div>
                 </div>

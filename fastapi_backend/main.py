@@ -70,7 +70,7 @@ def create_app():
         llm_svc=llm_svc,
         csv_path="SB_publication_PMC.csv",
         chroma_persist_dir="tmp/embeddings/SB_publication_PMC",
-        top_k_docs=15
+        top_k_docs=4
     )
 
     # Initialize vector stores with rate limiting

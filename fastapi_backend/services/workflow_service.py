@@ -78,8 +78,8 @@ class WorkflowService:
                 # Extract unique research papers from sources
                 unique_papers = set()
                 for source in sources:
-                    if 'title' in source.metadata:
-                        unique_papers.add(source.metadata['title'])
+                    if 'link' in source.metadata:
+                        unique_papers.add(source.metadata['link'])
                 
                 result["rag_response"] = {
                     "summary": summary,
@@ -142,8 +142,8 @@ class WorkflowService:
             # Extract unique research papers from sources
             unique_papers = set()
             for source in sources:
-                if 'title' in source.metadata:
-                    unique_papers.add(source.metadata['title'])
+                if 'link' in source.metadata:
+                    unique_papers.add(source.metadata['link'])
             
             return {
                 "summary": summary,

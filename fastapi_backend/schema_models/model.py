@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from pydantic import Field
 from fastapi import UploadFile, File
 
+class ProteinName(BaseModel):
+    protein_name: str = Field(description="The name of the protein or gene")
 
 class ProteinInfo(BaseModel):
     protein_name: str = Field(description="The name of the protein or gene")

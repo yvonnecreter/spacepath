@@ -89,18 +89,10 @@ def create_app():
     class QueryRequest(BaseModel):
         query: str
 
-    class QueryResponse(BaseModel):
-        query: str
-        protein_name: Optional[str]
-        protein_info: Optional[dict]
-        clinical_studies: Optional[dict]
-        rag_response: Optional[dict]
-        error: Optional[str]
-
     class ProteinRequest(BaseModel):
         protein_name: str
 
-    @app.post("/query", response_model=QueryResponse)
+    @app.post("/query")
     async def process_query(request: QueryRequest):
         """
         Main endpoint: Process user query through complete workflow
@@ -110,7 +102,7 @@ def create_app():
         """
         try:
             result = await workflow_service.process_query(request.query)
-            return QueryResponse(**result)
+            return result
         except Exception as e:
             logger.error(f"Error processing query: {e}")
             raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")

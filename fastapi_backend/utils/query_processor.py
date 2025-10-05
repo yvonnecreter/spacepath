@@ -2,10 +2,7 @@ from fastapi_backend.services.llm_service import LLMService
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import re
-
-class ProteinName(BaseModel):
-    protein_name: str = Field(description="The name of the protein or gene")
-    confidence: float = Field(description="Confidence score between 0 and 1", ge=0.0, le=1.0)
+from fastapi_backend.schema_models.model import ProteinName
 
 def extract_protein_name(query: str, llm_svc: LLMService) -> Optional[str]:
     """
@@ -41,7 +38,7 @@ Examples:
         formatter = llm_svc.llm_provider.with_structured_output(ProteinName)
         result = formatter.invoke(prompt)
         
-        if result.protein_name and result.protein_name != "UNKNOWN" and result.confidence > 0.5:
+        if result.protein_name and result.protein_name != "UNKNOWN":
             return result.protein_name
         else:
             return None

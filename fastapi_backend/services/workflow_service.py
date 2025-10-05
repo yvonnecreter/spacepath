@@ -48,14 +48,8 @@ class WorkflowService:
         # Step 1: Extract protein name from query
         protein_name = extract_protein_name(query, self.llm_svc)
         
-        result = {
-            "query": query,
+        return {
             "protein_name": protein_name,
-            "protein_info": None,
-            "clinical_studies": None,
-            "rag_response": None,
-            "pathways": None,
-            "error": None
         }
         
         try:

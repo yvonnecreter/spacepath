@@ -62,7 +62,7 @@ def get_protein_function(accession: str):
             for t in texts:
                 functions.append(t.get("value", ""))
     
-    return functions
+    return [functions[0]]
 
 
 def extract_protein_details(protein_name: str):

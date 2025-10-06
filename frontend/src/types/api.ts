@@ -16,6 +16,7 @@ export interface ClinicalStudy {
   title: string;
   brief_summary: string;
   link: string;
+  publication_year?: string;
 }
 
 export interface ClinicalStudiesResponse {

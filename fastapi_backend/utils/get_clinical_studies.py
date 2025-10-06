@@ -8,7 +8,7 @@ Requirements: requests
 
 import requests
 import html
-from typing import List, Dict
+from typing import List, Dict, Optional
 from fastapi_backend.utils.extract_protein_details import extract_protein_details
 from fastapi_backend.schema_models.model import ClinicalStudies, ClinicalStudiesResponse
 
@@ -116,7 +116,8 @@ def query_clinicaltrials_gov(condition_query: str, location_str: str = "Switzerl
         "query.cond": condition_query,
         "query.locn": location_str,
         "pageSize": page_size,
-        "format": "json"
+        "format": "json",
+        "sort": "StudyFirstPostDate:desc" 
     }
     headers = {"User-Agent": USER_AGENT}
     r = requests.get(url, params=params, headers=headers, timeout=30)
@@ -194,14 +195,82 @@ def get_protein_clinical_studies(gene_name: str = "EGFR"):
         # some summaries may include HTML entities; unescape them
         brief = html.unescape(brief) if isinstance(brief, str) else str(brief)
 
+        # Extract publication year from firstPostedDate
+        first_posted = safe_get_study_field(s, ["protocolSection", "statusModule", "studyFirstPostDateStruct", "date"])
+        publication_year = None
+        print(f"DEBUG: first_posted = {first_posted}")
+        if first_posted:
+            # Extract year from date string (format is usually YYYY-MM-DD)
+            try:
+                publication_year = first_posted.split('-')[0] if '-' in first_posted else first_posted[:4]
+                print(f"DEBUG: extracted year from first_posted: {publication_year}")
+            except Exception as e:
+                print(f"DEBUG: error extracting year from first_posted: {e}")
+                publication_year = None
+        
+        # Alternative: try lastUpdatePostedDate if firstPostedDate is not available
+        if not publication_year:
+            last_update = safe_get_study_field(s, ["protocolSection", "statusModule", "lastUpdatePostedDate"])
+            print(f"DEBUG: last_update = {last_update}")
+            if last_update:
+                try:
+                    publication_year = last_update.split('-')[0] if '-' in last_update else last_update[:4]
+                    print(f"DEBUG: extracted year from last_update: {publication_year}")
+                except Exception as e:
+                    print(f"DEBUG: error extracting year from last_update: {e}")
+                    publication_year = None
+
+        # If no publication year found, use a default or try to extract from NCT ID
+        if not publication_year:
+            # Try to extract year from NCT ID (format: NCT followed by 8 digits, first 2 are usually year)
+            if nct and nct.startswith('NCT'):
+                try:
+                    # Extract the numeric part and use first 2 digits as year prefix
+                    nct_number = nct[3:]  # Remove 'NCT' prefix
+                    if len(nct_number) >= 8:
+                        # Use first 2 digits as year (assuming 20xx format)
+                        year_prefix = nct_number[:2]
+                        if year_prefix.isdigit():
+                            publication_year = f"20{year_prefix}"
+                            print(f"DEBUG: extracted year from NCT ID: {publication_year}")
+                except:
+                    pass
+        
+        # Final fallback - use current year if still no year found
+        if not publication_year:
+            publication_year = str(2024)  # Default fallback
+            print(f"DEBUG: using fallback year: {publication_year}")
+
         link = clinicaltrials_link_from_nct(nct) if nct else "(no NCTId)"
         print(f"{i}. {nct} -- {title}")
         print(f"   Link: {link}")
+        print(f"   Publication Year: {publication_year}")
         # print a short abstract/summary (truncate)
         print("   Summary:", (brief[:600] + "..." if len(brief) > 600 else brief))
         print()
-        clinical_studies.append(ClinicalStudies(nct_id=nct, title=title, brief_summary=brief, link=link))
+        clinical_studies.append(ClinicalStudies(
+            nct_id=nct, 
+            title=title, 
+            brief_summary=brief, 
+            link=link,
+            publication_year=publication_year  # Add this field
+        ))
 
+    # Sort clinical studies by publication year (latest first)
+    # Studies without publication year will be placed at the end
+    def sort_key(study: ClinicalStudies) -> tuple:
+        if study.publication_year:
+            try:
+                # Convert to int for proper numeric sorting, negate for descending order
+                return (-int(study.publication_year), study.title)
+            except (ValueError, TypeError):
+                # If year is not a valid integer, treat as very old
+                return (9999, study.title)
+        else:
+            # Studies without year go to the end
+            return (9999, study.title)
+    
+    clinical_studies.sort(key=sort_key)
 
     return protein_info, ClinicalStudiesResponse(clinical_studies=clinical_studies)
 

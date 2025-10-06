@@ -30,6 +30,7 @@ class ClinicalStudies(BaseModel):
     title: str = Field(description="The title of the clinical study")
     brief_summary: str = Field(description="The brief summary of the clinical study")
     link: str = Field(description="The link to the clinical study")
+    publication_year: Optional[str] = Field(description="The year the study was first posted", default=None)
 
 class ClinicalStudiesResponse(BaseModel):
     clinical_studies: List[ClinicalStudies] = Field(description="The list of clinical studies")

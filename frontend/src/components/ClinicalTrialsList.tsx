@@ -12,6 +12,9 @@ interface ClinicalTrialsListProps {
 export const ClinicalTrialsList = ({ clinicalStudies = [], isLoading = false }: ClinicalTrialsListProps) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  // Debug: Log the clinical studies data to see what we're receiving
+  console.log('ClinicalTrialsList - clinicalStudies:', clinicalStudies);
+
   const toggleExpand = (id: string) => {
     setExpandedId(expandedId === id ? null : id);
   };
@@ -39,8 +42,25 @@ export const ClinicalTrialsList = ({ clinicalStudies = [], isLoading = false }: 
   }
 
   return (
-    <div className="h-full overflow-y-auto space-y-4">
-      {clinicalStudies.map((study, index) => (
+    <div className="h-full overflow-y-auto">
+      {/* Header with sorting info */}
+      <div className="mb-4 px-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            Clinical Studies ({clinicalStudies.length})
+          </h2>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Activity className="h-3 w-3" />
+            <span>Sorted by publication year (latest first)</span>
+          </div>
+        </div>
+      </div>
+      
+      <div className="space-y-4">
+        {clinicalStudies.map((study, index) => {
+          // Debug: Log each study to see the publication_year
+          console.log(`Study ${index}:`, study, 'Publication year:', study.publication_year);
+          return (
         <Card 
           key={study.nct_id || index} 
           className="bg-white border border-border shadow-sm hover:shadow-md transition-all duration-300 hover-scale overflow-hidden"
@@ -48,20 +68,38 @@ export const ClinicalTrialsList = ({ clinicalStudies = [], isLoading = false }: 
           <div className="p-6">
             {/* Header Section */}
             <div className="flex items-start justify-between mb-4">
-              <h3 className="text-base font-semibold text-foreground leading-snug flex-1 pr-4">
-                {study.title}
-              </h3>
-              <button
-                onClick={() => toggleExpand(study.nct_id || index.toString())}
-                className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
-                aria-label="Toggle details"
-              >
-                {expandedId === (study.nct_id || index.toString()) ? (
-                  <ChevronUp className="h-5 w-5" />
-                ) : (
-                  <ChevronDown className="h-5 w-5" />
-                )}
-              </button>
+              <div className="flex-1 pr-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-base font-semibold text-foreground leading-snug">
+                    {study.title}
+                  </h3>
+                  {study.publication_year && 
+                   parseInt(study.publication_year) >= new Date().getFullYear() - 1 && (
+                    <Badge variant="default" className="text-xs px-2 py-0.5">
+                      Recent
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <div className="text-xs text-muted-foreground mb-1">Published</div>
+                  <Badge variant="outline" className="text-sm font-medium px-3 py-1">
+                    {study.publication_year || "N/A"}
+                  </Badge>
+                </div>
+                <button
+                  onClick={() => toggleExpand(study.nct_id || index.toString())}
+                  className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+                  aria-label="Toggle details"
+                >
+                  {expandedId === (study.nct_id || index.toString()) ? (
+                    <ChevronUp className="h-5 w-5" />
+                  ) : (
+                    <ChevronDown className="h-5 w-5" />
+                  )}
+                </button>
+              </div>
             </div>
 
 
@@ -88,20 +126,12 @@ export const ClinicalTrialsList = ({ clinicalStudies = [], isLoading = false }: 
                 <ExternalLink className="h-3.5 w-3.5" />
                 <span className="font-mono">{study.nct_id}</span>
               </a>
-              
-              {/* <a
-                href={study.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 transition-colors font-medium"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                <span>View on ClinicalTrials.gov</span>
-              </a> */}
             </div>
           </div>
         </Card>
-      ))}
+          );
+        })}
+      </div>
     </div>
   );
 };
